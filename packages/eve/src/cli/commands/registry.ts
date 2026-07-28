@@ -4,8 +4,10 @@ import {
   searchRegistries,
   type RegistryConfig,
 } from "#compiled/shadcn-registry/index.js";
-import { isEveProject } from "#setup/scaffold/index.js";
+import { z } from "#compiled/zod/index.js";
+import { isEveProject, type ChannelKind } from "#setup/scaffold/index.js";
 
+import type { runChannelsAddCommand } from "./channels.js";
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 import { addRegistryMappings, readRegistryConfig } from "./registry-project.js";
 
@@ -18,6 +20,14 @@ export interface AddCommandOptions {
   overwrite?: boolean;
 }
 
+export interface AddCommandDependencies {
+  loadChannelsAddCommand(): Promise<typeof runChannelsAddCommand>;
+}
+
+const defaultAddCommandDependencies: AddCommandDependencies = {
+  loadChannelsAddCommand: async () => (await import("./channels.js")).runChannelsAddCommand,
+};
+
 const OFFICIAL_REGISTRY = "https://eve.dev/r";
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
 
@@ -27,6 +37,27 @@ function isRegistryAddress(value: string): boolean {
 
 function itemAddress(item: string): string {
   return isRegistryAddress(item) ? item : `${OFFICIAL_REGISTRY}/${item}.json`;
+}
+
+const EveRegistryItemMetadataSchema = z.object({
+  meta: z
+    .object({
+      eve: z
+        .object({
+          channel: z
+            .enum(["slack", "web"], {
+              error: (issue) =>
+                `Unknown eve channel kind in registry metadata: ${String(issue.input)}`,
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+});
+
+function channelKindFromRegistryItem(item: unknown): ChannelKind | undefined {
+  return EveRegistryItemMetadataSchema.parse(item).meta?.eve?.channel;
 }
 
 function errorMessage(error: unknown): string {
@@ -64,14 +95,25 @@ function validateRegistrySource(source: string | undefined): void {
 
 function printSearchResults(
   logger: RegistryCommandLogger,
-  items: Array<{ addCommandArgument: string; description?: string }>,
+  result: Awaited<ReturnType<typeof searchRegistries>>,
+  options: { query: string | undefined; sources: string[] },
 ): void {
-  if (items.length === 0) {
+  if (result.items.length === 0) {
     logger.log("No registry items found.");
     return;
   }
-  for (const item of items) {
-    logger.log(`${item.addCommandArgument}${item.description ? ` — ${item.description}` : ""}`);
+
+  const count = `${result.pagination.total} item${result.pagination.total === 1 ? "" : "s"}`;
+  const query = options.query === undefined ? "" : ` matching "${options.query}"`;
+  const registries = `${options.sources.length} registr${options.sources.length === 1 ? "y" : "ies"}`;
+  logger.log(`Found ${count}${query} in ${registries}`);
+  logger.log("");
+
+  for (const item of result.items) {
+    const address = item.registry === OFFICIAL_CATALOG ? item.name : item.addCommandArgument;
+    const description =
+      options.query === undefined && item.description ? ` — ${item.description}` : "";
+    logger.log(`${address}${description}`);
   }
 }
 
@@ -91,7 +133,7 @@ async function browseRegistryItems(
   });
   const errors = result.errors ?? [];
   if (errors.length < sources.length) {
-    printSearchResults(logger, result.items);
+    printSearchResults(logger, result, { query, sources });
   }
   for (const error of errors) {
     logger.error(`${error.registry}: ${error.message}`);
@@ -105,10 +147,23 @@ export async function runAddCommand(
   appRoot: string,
   item: string,
   options: AddCommandOptions,
+  dependencies: AddCommandDependencies = defaultAddCommandDependencies,
 ): Promise<void> {
   await runRegistryAction(logger, appRoot, async () => {
     const config = await readRegistryConfig(appRoot);
-    await addRegistryItems([itemAddress(item)], { ...options, config, cwd: appRoot });
+    const address = itemAddress(item);
+    const [registryItem] = await getRegistryItems([address], { config });
+    const channelKind = channelKindFromRegistryItem(registryItem);
+    if (channelKind !== undefined) {
+      const runChannelsAddCommand = await dependencies.loadChannelsAddCommand();
+      await runChannelsAddCommand(logger, appRoot, {
+        kind: channelKind,
+        options: {},
+      });
+      return;
+    }
+
+    await addRegistryItems([address], { ...options, config, cwd: appRoot });
   });
 }
 

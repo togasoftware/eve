@@ -57,11 +57,17 @@ describe("registry commands", () => {
 
   it("installs official items through the registry SDK", async () => {
     const logger = createLogger();
+    getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
 
     await runAddCommand(logger, "/project", "extension/browser", {
       overwrite: true,
     });
 
+    expect(getRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/extension/browser.json"], {
+      config: {
+        registries: { "@acme": "https://example.com/r/{name}.json" },
+      },
+    });
     expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/extension/browser.json"], {
       config: {
         registries: { "@acme": "https://example.com/r/{name}.json" },
@@ -70,6 +76,72 @@ describe("registry commands", () => {
       overwrite: true,
     });
     expect(logger.errors).toEqual([]);
+  });
+
+  it.each(["web", "slack"] as const)(
+    "routes registry metadata for %s through channel setup",
+    async (kind) => {
+      const logger = createLogger();
+      const runChannelsAddCommand = vi.fn(async () => {});
+      getRegistryItems.mockResolvedValue([
+        {
+          name: `channel/${kind}`,
+          type: "registry:item",
+          meta: { eve: { channel: kind } },
+        },
+      ]);
+
+      await runAddCommand(
+        logger,
+        "/project",
+        `channel/${kind}`,
+        { overwrite: true },
+        { loadChannelsAddCommand: async () => runChannelsAddCommand },
+      );
+
+      expect(runChannelsAddCommand).toHaveBeenCalledWith(logger, "/project", {
+        kind,
+        options: {},
+      });
+      expect(addRegistryItems).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not infer channel setup from the item address", async () => {
+    const logger = createLogger();
+    const runChannelsAddCommand = vi.fn(async () => {});
+    getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      {},
+      {
+        loadChannelsAddCommand: async () => runChannelsAddCommand,
+      },
+    );
+
+    expect(runChannelsAddCommand).not.toHaveBeenCalled();
+    expect(addRegistryItems).toHaveBeenCalledOnce();
+  });
+
+  it("rejects unknown channel metadata", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/unknown",
+        type: "registry:item",
+        meta: { eve: { channel: "unknown" } },
+      },
+    ]);
+
+    await runAddCommand(logger, "/project", "channel/unknown", {});
+
+    expect(logger.errors).toHaveLength(1);
+    expect(logger.errors[0]).toContain("Unknown eve channel kind in registry metadata: unknown");
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   it("adds namespace mappings to package.json", async () => {
@@ -113,10 +185,39 @@ describe("registry commands", () => {
     expect(logger.logs).toEqual(["No registry items found."]);
   });
 
+  it("preserves explicit registry URLs in list output", async () => {
+    const logger = createLogger();
+    searchRegistries.mockResolvedValue({
+      items: [
+        {
+          registry: "https://example.com/r/registry.json",
+          name: "search",
+          addCommandArgument: "https://example.com/r/search.json",
+          description: "External search tools",
+        },
+      ],
+      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+    });
+
+    await runRegistryListCommand(logger, "/project", "https://example.com/r/registry.json");
+
+    expect(logger.logs).toEqual([
+      "Found 1 item in 1 registry",
+      "",
+      "https://example.com/r/search.json — External search tools",
+    ]);
+  });
+
   it("searches the official catalog and configured registries", async () => {
     const logger = createLogger();
     searchRegistries.mockResolvedValue({
       items: [
+        {
+          registry: "https://eve.dev/r/registry.json",
+          name: "extension/agent-browser",
+          addCommandArgument: "https://eve.dev/r/extension/agent-browser.json",
+          description: "Browser automation",
+        },
         {
           registry: "@acme",
           name: "browser",
@@ -124,7 +225,7 @@ describe("registry commands", () => {
           description: "Browser tools",
         },
       ],
-      pagination: { total: 1, offset: 0, limit: 1, hasMore: false },
+      pagination: { total: 2, offset: 0, limit: 2, hasMore: false },
     });
 
     await runRegistrySearchCommand(logger, "/project", "browser");
@@ -136,7 +237,12 @@ describe("registry commands", () => {
       continueOnError: true,
       query: "browser",
     });
-    expect(logger.logs).toEqual(["@acme/browser — Browser tools"]);
+    expect(logger.logs).toEqual([
+      'Found 2 items matching "browser" in 2 registries',
+      "",
+      "extension/agent-browser",
+      "@acme/browser",
+    ]);
   });
 
   it("reports total registry failure without describing it as an empty result", async () => {
