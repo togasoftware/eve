@@ -588,7 +588,7 @@ describe("useEveAgent", () => {
     let sendPromise: Promise<void> | undefined;
     await act(async () => {
       sendPromise = helpers?.send({
-        inputResponses: [{ optionId: "deny", requestId: "approval_1" }],
+        inputResponses: [{ optionId: "cancel", requestId: "approval_1" }],
       });
       await Promise.resolve();
     });

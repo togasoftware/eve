@@ -227,7 +227,7 @@ describe("teamsChannel", () => {
       eve_input: {
         replyToActivityId: "THREAD_ROOT",
         requestId: "REQ",
-        optionId: "deny",
+        optionId: "cancel",
       },
     };
     const channel = teamsChannel({
@@ -240,7 +240,7 @@ describe("teamsChannel", () => {
 
     expect(onMessage).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "deny", requestId: "REQ" }] },
+      { inputResponses: [{ optionId: "cancel", requestId: "REQ" }] },
       expect.objectContaining({ continuationToken: "TENANT:CONV:THREAD_ROOT" }),
     );
   });

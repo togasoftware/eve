@@ -448,7 +448,7 @@ describe("slackChannel() default event handlers", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "cancel", label: "No" },
             ],
             prompt: "Approve tool call: mongodb-mutate",
             requestId: "approval_abc123",
@@ -523,12 +523,12 @@ describe("slackChannel() default event handlers", () => {
     expect(new Set(actionIds).size).toBe(actionIds.length);
     expect(actions).toMatchObject([
       {
-        text: { type: "plain_text", text: "Deny", emoji: false },
-        value: "deny",
+        text: { type: "plain_text", text: "Cancel", emoji: false },
+        value: "cancel",
       },
       {
         style: "primary",
-        text: { type: "plain_text", text: "Allow", emoji: false },
+        text: { type: "plain_text", text: "Approve", emoji: false },
         value: "approve",
       },
     ]);
@@ -599,7 +599,7 @@ describe("slackChannel() default event handlers", () => {
       kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "cancel", label: "No" },
       ],
       prompt: `Approve tool call ${index}`,
       requestId: `approval_${index}`,
@@ -2243,13 +2243,13 @@ describe("slackChannel() HITL interaction pipeline", () => {
                 {
                   type: "button",
                   action_id: firstDenyActionId,
-                  text: { type: "plain_text", text: "Deny" },
-                  value: "deny",
+                  text: { type: "plain_text", text: "Cancel" },
+                  value: "cancel",
                 },
                 {
                   type: "button",
                   action_id: firstApproveActionId,
-                  text: { type: "plain_text", text: "Allow" },
+                  text: { type: "plain_text", text: "Approve" },
                   value: "approve",
                 },
               ],
@@ -2274,13 +2274,13 @@ describe("slackChannel() HITL interaction pipeline", () => {
                 {
                   type: "button",
                   action_id: secondDenyActionId,
-                  text: { type: "plain_text", text: "Deny" },
-                  value: "deny",
+                  text: { type: "plain_text", text: "Cancel" },
+                  value: "cancel",
                 },
                 {
                   type: "button",
                   action_id: secondApproveActionId,
-                  text: { type: "plain_text", text: "Allow" },
+                  text: { type: "plain_text", text: "Approve" },
                   value: "approve",
                 },
               ],
@@ -2299,7 +2299,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         actions: [
           {
             action_id: firstApproveActionId,
-            text: { type: "plain_text", text: "Allow" },
+            text: { type: "plain_text", text: "Approve" },
             value: "approve",
           },
         ],
@@ -2329,14 +2329,14 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
     expect(body).toMatchObject({
       channel: "C01",
-      text: "Answered: Allow",
+      text: "Answered: Approve",
       ts: "1700000000.000010",
     });
     expect(JSON.stringify(body.blocks)).toContain("Approve issue 451?");
-    expect(JSON.stringify(body.blocks)).toContain("Allow");
+    expect(JSON.stringify(body.blocks)).toContain("Approve");
     expect(JSON.stringify(body.blocks)).toContain("Tool input");
     expect(JSON.stringify(body.blocks)).toContain("Approve issue 508?");
-    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Allow* by <@U_APPROVER>");
+    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Approve* by <@U_APPROVER>");
     expect(body.blocks[0]?.subtext?.text?.length).toBeLessThanOrEqual(
       SLACK_CARD_SUBTEXT_MAX_LENGTH,
     );
@@ -2370,7 +2370,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "cancel", label: "No" },
             ],
             prompt: "Approve tool call: escalate_issue",
             requestId: "approval_451",
@@ -2386,7 +2386,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "cancel", label: "No" },
             ],
             prompt: "Approve tool call: escalate_issue",
             requestId: "approval_508",
@@ -2418,11 +2418,11 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
     expect(posted.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
 
-    const firstDenyAction = posted.blocks[0]?.actions?.find((action) => action.value === "deny");
+    const firstDenyAction = posted.blocks[0]?.actions?.find((action) => action.value === "cancel");
     expect(firstDenyAction).toMatchObject({
       action_id: `${HITL_ACTION_PREFIX}approval_451:button:0`,
-      text: { text: "Deny" },
-      value: "deny",
+      text: { text: "Cancel" },
+      value: "cancel",
     });
 
     const { send } = await firePost(
@@ -2445,8 +2445,8 @@ describe("slackChannel() HITL interaction pipeline", () => {
         actions: [
           {
             action_id: firstDenyAction?.action_id,
-            text: { type: "plain_text", text: "Deny" },
-            value: "deny",
+            text: { type: "plain_text", text: "Cancel" },
+            value: "cancel",
           },
         ],
       }),
@@ -2454,7 +2454,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0]).toEqual({
-      inputResponses: [{ optionId: "deny", requestId: "approval_451" }],
+      inputResponses: [{ optionId: "cancel", requestId: "approval_451" }],
     });
 
     const updateCall = fetchMock.mock.calls.find(
@@ -2470,7 +2470,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       }>;
     };
 
-    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Deny* by <@U0AT7H56S90>");
+    expect(body.blocks[0]?.subtext?.text).toBe(":white_check_mark: *Cancel* by <@U0AT7H56S90>");
     expect(body.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
     expect(body.blocks[3]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
     const remainingActionIds = body.blocks.flatMap(
