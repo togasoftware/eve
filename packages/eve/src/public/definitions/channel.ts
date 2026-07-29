@@ -236,6 +236,8 @@ type ChannelSessionFailedHandler<TCtx> = (
  * and the channel context, with no `ctx`.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly "approval.candidate"?: ChannelEventHandler<"approval.candidate", TCtx>;
+  readonly "approval.settled"?: ChannelEventHandler<"approval.settled", TCtx>;
   readonly "turn.started"?: ChannelEventHandler<"turn.started", TCtx>;
   readonly "actions.requested"?: ChannelEventHandler<"actions.requested", TCtx>;
   readonly "action.result"?: ChannelEventHandler<"action.result", TCtx>;
@@ -339,6 +341,8 @@ export function defineChannel<
 // The Record type fails to compile if this map drifts from the ChannelEvents
 // keys in either direction.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "approval.candidate": null,
+  "approval.settled": null,
   "turn.started": null,
   "actions.requested": null,
   "action.result": null,
@@ -429,8 +433,9 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
       };
     },
 
-    deliver(payload: DeliverPayload) {
-      return defaultDeliverResult(payload);
+    deliver(payload: DeliverPayload, adapterCtx) {
+      if (definition.deliver === undefined) return defaultDeliverResult(payload);
+      return definition.deliver(payload, adapterCtx as TCtx);
     },
 
     ...eventHandlers,
