@@ -35,7 +35,7 @@ describe("extractQuestionInputRequests", () => {
         },
         display: "select",
         kind: "question",
-        options: [{ id: "yes", label: "Yes" }],
+        options: [{ id: "yes", label: "Approve" }],
         prompt: "Continue?",
         requestId: "call-1",
       },

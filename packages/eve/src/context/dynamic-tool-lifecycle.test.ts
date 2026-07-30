@@ -1,4 +1,4 @@
-import { asSchema } from "ai";
+import { asSchema, jsonSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
@@ -19,10 +19,12 @@ const {
   dispatchDynamicToolEvent,
   refreshDynamicSessionToolsForRuntimeRevision,
 } = await import("#context/dynamic-tool-lifecycle.js");
-const { buildDynamicTools } = await import("#context/build-dynamic-tools.js");
+const { buildDynamicTools, buildResponseAuthorizationTools } =
+  await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
 import {
+  LiveStepToolsKey,
   SessionIdKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -1182,6 +1184,41 @@ describe("framework dynamic tools (no bundler transform)", () => {
       "user-approval",
     );
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
+  });
+
+  it("uses the first dynamic definition for response authorization", () => {
+    const ctx = createCtx();
+    ctx.set(LiveStepToolsKey, [
+      {
+        approval: {
+          authorizeResponse: async () => "allowed" as const,
+          policy: () => "user-approval",
+        },
+        description: "step",
+        execute: () => null,
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "guarded",
+      },
+    ]);
+    ctx.set(SessionDynamicToolMetadataKey, [
+      {
+        approvalResponseStepFnName: "session-authorizer",
+        approvalStepFnName: "session-policy",
+        description: "session",
+        entryKey: "session:guarded",
+        executeStepFnName: "session-execute",
+        inputSchema: { type: "object" },
+        name: "guarded",
+        resolverSlug: "session",
+      },
+    ]);
+
+    const tools = buildResponseAuthorizationTools({
+      authoredTools: new Map(),
+      context: ctx,
+    });
+
+    expect(tools.get("guarded")?.description).toBe("step");
   });
 
   it("replays response authorization from session-scoped dynamic tools", async () => {
