@@ -20,7 +20,19 @@ export {
   type ToolModelOutputPart,
 } from "#public/definitions/tool.js";
 export { toolOutput, toolOutputPart } from "#public/tools/output-builders.js";
-export type { Approval, ApprovalContext, ApprovalStatus } from "#public/definitions/approval.js";
+export type {
+  Approval,
+  ApprovalConfiguration,
+  ApprovalContext,
+  ApprovalPolicy,
+  ApprovalResponseAuth,
+  ApprovalResponseAuthorization,
+  ApprovalResponseAuthorizer,
+  ApprovalResponseContext,
+  ApprovalResponseRequest,
+  ApprovalResponseSession,
+  ApprovalStatus,
+} from "#public/definitions/approval.js";
 export type {
   DynamicToolEntry,
   DynamicEvents,
