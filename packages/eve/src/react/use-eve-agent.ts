@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import {
   EveAgentStore,
@@ -37,11 +37,11 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * Snapshot plus commands returned by `useEveAgent`.
  */
 export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
-  /** Resets the session: aborts any in-flight turn, recreates the owned session, and clears events and projected data. */
+  /** Resets the session: aborts local transport, recreates the owned session, and clears local state. */
   readonly reset: () => void;
   /** Sends a turn (message, HITL responses, and/or client context). Rejects if a turn is already in flight. */
   readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
-  /** Aborts the in-flight turn's stream, if any. */
+  /** Durably cancels the active turn while keeping its event stream attached. */
   readonly stop: () => void;
 }
 
@@ -105,9 +105,9 @@ export function useEveAgent<TData>(
  *
  * Returns the current snapshot (`data`, `events`, `session`, `status`, `error`)
  * plus the commands `send`, `stop`, and `reset`. With no reducer, `data` is the
- * built-in `UIMessage` projection from {@link defaultMessageReducer} (`TData`
- * is {@link EveMessageData}); pass a reducer to project into your own shape and
- * infer `TData`.
+ * built-in `UIMessage` projection from
+ * {@link defaultMessageReducer} (`TData` is {@link EveMessageData}); pass a
+ * reducer to project into your own shape and infer `TData`.
  *
  * Session-shaping options (`host`, `reducer`, `session`, `initialEvents`,
  * `initialSession`, `auth`, `headers`, `optimistic`) are
@@ -152,6 +152,8 @@ export function useEveAgent<TData>(
     () => store.snapshot,
     () => store.snapshot,
   );
+
+  useEffect(() => () => store.dispose(), [store]);
 
   const reset = useCallback(() => store.reset(), [store]);
   const send = useCallback(

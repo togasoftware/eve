@@ -50,7 +50,7 @@ export interface UseEveAgentReturn<TData> {
   readonly session: ComputedRef<SessionState>;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: ComputedRef<UseEveAgentStatus>;
-  /** Abort the in-flight request. */
+  /** Durably cancel the active turn while keeping its event stream attached. */
   readonly stop: () => void;
 }
 
@@ -132,8 +132,8 @@ export function useEveAgent<TData>(
  * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
  * `send`, `stop`, and `reset`. Configuration is read once on store creation;
- * remount to change it. On scope dispose, the in-flight request is aborted and
- * the store unsubscribed.
+ * remount to change it. On scope dispose, the local request is aborted and the
+ * store unsubscribed.
  */
 export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
@@ -168,7 +168,7 @@ export function useEveAgent<TData>(
 
     onScopeDispose(() => {
       unsubscribe();
-      store.stop();
+      store.dispose();
     });
   }
 

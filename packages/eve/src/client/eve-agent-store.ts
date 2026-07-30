@@ -2,7 +2,7 @@ import { Client } from "#client/client.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { toError } from "#shared/errors.js";
 import type { ClientAuth, HeadersValue, SendTurnPayload, SessionState } from "#client/types.js";
 import type { UserContent } from "ai";
@@ -93,7 +93,8 @@ interface PendingMessageSubmission {
  * Drives one turn at a time: `send` rejects if a turn is already submitted or
  * streaming. Read the latest projection via the `snapshot` getter, observe
  * changes with `subscribe`, register lifecycle hooks with `setCallbacks`,
- * abort the in-flight turn with `stop`, and discard all state with `reset`.
+ * durably cancel the in-flight turn with `stop`, and discard all state with
+ * `reset`.
  */
 export class EveAgentStore<TData> {
   readonly #createSession: (() => ClientSession) | undefined;
@@ -105,7 +106,11 @@ export class EveAgentStore<TData> {
   #seenEvents = createEventDeduper();
 
   #abortController: AbortController | undefined;
+  #activeTurnId: string | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
+  #cancellationError: { readonly error: Error; readonly turnId: string } | undefined;
+  #cancelRequested = false;
+  #cancelSentTurnId: string | undefined;
   #data: TData;
   #error: Error | undefined;
   #events: readonly MessageStreamEvent[];
@@ -164,6 +169,10 @@ export class EveAgentStore<TData> {
     const operationId = this.#startOperation();
     const abortController = new AbortController();
     this.#abortController = abortController;
+    this.#activeTurnId = undefined;
+    this.#cancellationError = undefined;
+    this.#cancelRequested = false;
+    this.#cancelSentTurnId = undefined;
     this.#error = undefined;
     this.#status = "submitted";
     this.#publish();
@@ -200,6 +209,7 @@ export class EveAgentStore<TData> {
         }
 
         this.#events = [...this.#events, event];
+        this.#observeTurnLifecycle(event, operationId);
         this.#applyServerEvent(event);
         this.#callbacks.onEvent?.(event);
         this.#applyTerminalStreamFailure(event);
@@ -235,14 +245,35 @@ export class EveAgentStore<TData> {
     }
   }
 
+  /**
+   * Requests cooperative cancellation of the active durable turn.
+   *
+   * The request is queued if the server has not emitted `turn.started` yet.
+   * The event stream remains attached through the turn boundary so the session
+   * can be continued safely.
+   */
   stop(): void {
+    if (this.#status !== "streaming" && this.#status !== "submitted") {
+      return;
+    }
+
+    this.#cancelRequested = true;
+    this.#requestTurnCancellation(this.#operationId);
+  }
+
+  /** @internal Aborts local transport during framework lifecycle cleanup. */
+  dispose(): void {
     this.#abortController?.abort();
   }
 
   reset(): void {
     this.#invalidateOperation();
-    this.stop();
+    this.dispose();
     this.#abortController = undefined;
+    this.#activeTurnId = undefined;
+    this.#cancellationError = undefined;
+    this.#cancelRequested = false;
+    this.#cancelSentTurnId = undefined;
     this.#session = this.#createSession?.() ?? this.#session;
     this.#events = [];
     this.#seenEvents = createEventDeduper();
@@ -273,6 +304,56 @@ export class EveAgentStore<TData> {
 
   #isCurrentOperation(operationId: number): boolean {
     return this.#operationId === operationId;
+  }
+
+  #observeTurnLifecycle(event: MessageStreamEvent, operationId: number): void {
+    if (event.type === "turn.started") {
+      this.#activeTurnId = event.data.turnId;
+      this.#requestTurnCancellation(operationId);
+      return;
+    }
+
+    if (isCurrentTurnBoundaryEvent(event)) {
+      const cancellationError = this.#cancellationError;
+      if (
+        cancellationError !== undefined &&
+        cancellationError.turnId === this.#activeTurnId &&
+        this.#error === cancellationError.error
+      ) {
+        this.#error = undefined;
+      }
+
+      this.#activeTurnId = undefined;
+      this.#cancellationError = undefined;
+      this.#cancelRequested = false;
+      this.#cancelSentTurnId = undefined;
+    }
+  }
+
+  #requestTurnCancellation(operationId: number): void {
+    const turnId = this.#activeTurnId;
+    if (!this.#cancelRequested || turnId === undefined || this.#cancelSentTurnId === turnId) {
+      return;
+    }
+
+    this.#cancelSentTurnId = turnId;
+    void this.#session.cancel({ turnId }).catch((error: unknown) => {
+      if (
+        !this.#isCurrentOperation(operationId) ||
+        this.#activeTurnId !== turnId ||
+        this.#cancelSentTurnId !== turnId
+      ) {
+        return;
+      }
+
+      this.#cancelRequested = false;
+      this.#cancelSentTurnId = undefined;
+      const cancellationError = toError(error);
+      this.#cancellationError = { error: cancellationError, turnId };
+      this.#error = cancellationError;
+      this.#callbacks.onError?.(cancellationError);
+      this.#publish();
+    });
   }
 
   #projectOptimisticMessage(input: SendTurnPayload): void {

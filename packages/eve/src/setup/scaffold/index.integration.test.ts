@@ -385,10 +385,9 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("preserveCompletedSessions: true");
-    expect(agentChatSource).toContain("session.cancel({ turnId })");
-    expect(agentChatSource).toContain("cancellation.sentTurnId === turnId");
-    expect(agentChatSource).not.toContain("onStop={agent.stop}");
+    expect(agentChatSource).toContain("onStop={agent.stop}");
+    expect(agentChatSource).not.toContain("preserveCompletedSessions");
+    expect(agentChatSource).not.toContain("turn.started");
   });
 
   test("writes npm dist-tags for Web Chat without semver range decoration", async () => {

@@ -52,7 +52,7 @@ export interface UseEveAgentReturn<TData> {
   readonly session: SessionState;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: UseEveAgentStatus;
-  /** Abort the in-flight request. */
+  /** Durably cancel the active turn while keeping its event stream attached. */
   readonly stop: () => void;
 }
 
@@ -133,7 +133,7 @@ class SvelteEveAgent<TData> implements UseEveAgentReturn<TData> {
 
       return () => {
         unsubscribe();
-        store.stop();
+        store.dispose();
       };
     });
   }
