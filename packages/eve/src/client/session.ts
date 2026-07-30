@@ -95,11 +95,12 @@ export class ClientSession {
   /**
    * Requests cooperative cancellation of this session's active turn.
    *
-   * Both `accepted` and `no_active_turn` are successful outcomes. The latter
-   * means the active turn settled before the request arrived or the session is
-   * already parked. `turnId` limits the request to the turn the caller
-   * observed; a stale guard is consumed as a benign no-op. Credentials are
-   * resolved immediately before the request.
+   * Both `accepted` and `no_active_turn` are successful HTTP outcomes. The
+   * latter means no cancellation hook admitted the request: the turn may have
+   * settled, the session may be parked, or turn startup may still be in
+   * progress. `turnId` limits the request to the turn the caller observed; a
+   * stale guard is consumed as a benign no-op. Credentials are resolved
+   * immediately before the request.
    *
    * @throws {Error} If this handle has not started or attached to a session.
    * @throws {ClientError} If the cancel route returns a non-successful status.

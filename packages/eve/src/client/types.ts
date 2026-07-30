@@ -233,7 +233,7 @@ export interface StreamOptions {
 export interface CancelSessionResult {
   /** Session whose active turn was targeted. */
   readonly sessionId: string;
-  /** Both outcomes are successful; `no_active_turn` means there was nothing left to cancel. */
+  /** `accepted` when admitted; otherwise `no_active_turn`, which can be transient at startup. */
   readonly status: CancelTurnStatus;
 }
 

@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { Client } from "#client/client.js";
 import { EveAgentStore } from "#client/eve-agent-store.js";
+import { MessageResponse } from "#client/message-response.js";
+import type { EveAgentReducer } from "#client/reducer.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
+  createTurnCancelledEvent,
+  createTurnStartedEvent,
   EVE_SESSION_ID_HEADER,
   type UnstampedMessageStreamEvent,
   type MessageStreamEvent,
@@ -63,7 +68,57 @@ function preV20MessageCompletedEvent(): MessageStreamEvent {
   } as MessageStreamEvent;
 }
 
+const eventCountReducer: EveAgentReducer<number> = {
+  initial: () => 0,
+  reduce: (count) => count + 1,
+};
+
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
+function createStoreHarness() {
+  const turnStarted = createDeferred();
+  const turnSettled = createDeferred();
+  const events = stampTestEvents([
+    createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+    createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+    createSessionWaitingEvent("eve:test"),
+  ] as UnstampedMessageStreamEvent[]);
+  const session = new Client({ host: "" }).session({
+    continuationToken: "eve:test",
+    sessionId: "session_test",
+    streamIndex: 0,
+  });
+  const cancel = vi.spyOn(session, "cancel");
+  const send = vi.spyOn(session, "send").mockResolvedValue(
+    new MessageResponse({
+      continuationToken: "eve:test",
+      createStream: async function* () {
+        await turnStarted.promise;
+        yield events[0]!;
+        await turnSettled.promise;
+        yield events[1]!;
+        yield events[2]!;
+      },
+      sessionId: "session_test",
+    }),
+  );
+  const store = new EveAgentStore({
+    optimistic: false,
+    reducer: eventCountReducer,
+    session,
+  });
+
+  return { cancel, send, store, turnSettled, turnStarted };
+}
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -145,5 +200,63 @@ describe("EveAgentStore stream overlap", () => {
     expect(store.snapshot.events.map((event) => event.meta.id)).toEqual(
       events.map((event) => event.meta.id),
     );
+  });
+});
+
+describe("EveAgentStore", () => {
+  it("queues Stop, retries admission, and keeps cancellation failures out of turn state", async () => {
+    vi.useFakeTimers();
+    const { cancel, store, turnSettled, turnStarted } = createStoreHarness();
+    cancel.mockRejectedValueOnce(new Error("Cancel transport failed")).mockResolvedValueOnce({
+      sessionId: "session_test",
+      status: "accepted",
+    });
+    const onError = vi.fn();
+    store.setCallbacks({ onError });
+
+    const send = store.send({ message: "Hello" });
+    store.stop();
+    expect(cancel).not.toHaveBeenCalled();
+
+    turnStarted.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenLastCalledWith({ turnId: "turn_1" });
+    expect(store.snapshot.error).toBeUndefined();
+    expect(onError).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(cancel).toHaveBeenCalledTimes(2);
+
+    store.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalledTimes(2);
+
+    turnSettled.resolve();
+    await send;
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.status).toBe("ready");
+  });
+
+  it("detaches local transport without cancelling server work and remains reusable", async () => {
+    const { cancel, send, store, turnSettled, turnStarted } = createStoreHarness();
+    const sending = store.send({ message: "Hello" });
+    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+    const input = send.mock.calls[0]?.[0];
+    if (input === undefined || typeof input === "string") {
+      throw new Error("Expected an object send payload.");
+    }
+
+    store.detach();
+
+    expect(input.signal?.aborted).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+
+    turnStarted.resolve();
+    turnSettled.resolve();
+    await sending;
+
+    await store.send({ message: "Hello again" });
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });

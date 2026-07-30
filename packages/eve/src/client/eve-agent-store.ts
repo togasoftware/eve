@@ -1,4 +1,5 @@
 import { Client } from "#client/client.js";
+import { cancelTurnUntilAdmitted } from "#client/cancel-turn-until-admitted.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
@@ -83,18 +84,24 @@ interface PendingMessageSubmission {
   readonly message: string;
 }
 
+interface ActiveTurn {
+  readonly abort: AbortController;
+  cancellation: "accepted" | "idle" | "requested" | "sending";
+  turnId?: string;
+}
+
 /**
  * Framework-agnostic state machine for an eve agent session.
  *
  * Manages the send/stream lifecycle, optimistic projection, and subscriber
- * notification; framework integrations (React, Vue) wrap it with their own
- * reactivity primitives.
+ * notification; framework integrations wrap it with their own reactivity
+ * primitives.
  *
  * Drives one turn at a time: `send` rejects if a turn is already submitted or
  * streaming. Read the latest projection via the `snapshot` getter, observe
  * changes with `subscribe`, register lifecycle hooks with `setCallbacks`,
- * durably cancel the in-flight turn with `stop`, and discard all state with
- * `reset`.
+ * request best-effort durable cancellation with `stop`, detach local transport
+ * with `detach`, and discard all state with `reset`.
  */
 export class EveAgentStore<TData> {
   readonly #createSession: (() => ClientSession) | undefined;
@@ -105,16 +112,11 @@ export class EveAgentStore<TData> {
   /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
   #seenEvents = createEventDeduper();
 
-  #abortController: AbortController | undefined;
-  #activeTurnId: string | undefined;
+  #activeTurn: ActiveTurn | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
-  #cancellationError: { readonly error: Error; readonly turnId: string } | undefined;
-  #cancelRequested = false;
-  #cancelSentTurnId: string | undefined;
   #data: TData;
   #error: Error | undefined;
   #events: readonly MessageStreamEvent[];
-  #operationId = 0;
   #pendingMessageSubmission: PendingMessageSubmission | undefined;
   #projectionEvents: readonly EveAgentReducerEvent[];
   #session: ClientSession;
@@ -166,13 +168,12 @@ export class EveAgentStore<TData> {
       throw new Error("eve session is already processing a turn.");
     }
 
-    const operationId = this.#startOperation();
     const abortController = new AbortController();
-    this.#abortController = abortController;
-    this.#activeTurnId = undefined;
-    this.#cancellationError = undefined;
-    this.#cancelRequested = false;
-    this.#cancelSentTurnId = undefined;
+    const turn: ActiveTurn = {
+      abort: abortController,
+      cancellation: "idle",
+    };
+    this.#activeTurn = turn;
     this.#error = undefined;
     this.#status = "submitted";
     this.#publish();
@@ -180,7 +181,7 @@ export class EveAgentStore<TData> {
     try {
       const preparedInput = (await this.#callbacks.prepareSend?.(input)) ?? input;
 
-      if (!this.#isCurrentOperation(operationId)) {
+      if (!this.#isActiveTurn(turn)) {
         return;
       }
 
@@ -195,7 +196,7 @@ export class EveAgentStore<TData> {
 
       let sawEvent = false;
       for await (const event of response) {
-        if (!this.#isCurrentOperation(operationId)) {
+        if (!this.#isActiveTurn(turn)) {
           return;
         }
 
@@ -209,20 +210,20 @@ export class EveAgentStore<TData> {
         }
 
         this.#events = [...this.#events, event];
-        this.#observeTurnLifecycle(event, operationId);
+        this.#observeTurnLifecycle(event, turn);
         this.#applyServerEvent(event);
         this.#callbacks.onEvent?.(event);
         this.#applyTerminalStreamFailure(event);
         this.#publish();
       }
 
-      if (!this.#isCurrentOperation(operationId)) {
+      if (!this.#isActiveTurn(turn)) {
         return;
       }
 
       this.#status = this.#error === undefined ? "ready" : "error";
     } catch (error) {
-      if (!this.#isCurrentOperation(operationId)) {
+      if (!this.#isActiveTurn(turn)) {
         return;
       }
 
@@ -236,8 +237,8 @@ export class EveAgentStore<TData> {
         this.#callbacks.onError?.(this.#error);
       }
     } finally {
-      if (this.#isCurrentOperation(operationId)) {
-        this.#abortController = undefined;
+      if (this.#isActiveTurn(turn)) {
+        this.#activeTurn = undefined;
         this.#callbacks.onSessionChange?.(this.#session.state);
         this.#publish();
         this.#callbacks.onFinish?.(this.#snapshot);
@@ -246,34 +247,45 @@ export class EveAgentStore<TData> {
   }
 
   /**
-   * Requests cooperative cancellation of the active durable turn.
+   * Requests best-effort cooperative cancellation of the durable turn started
+   * by this store.
    *
    * The request is queued if the server has not emitted `turn.started` yet.
-   * The event stream remains attached through the turn boundary so the session
-   * can be continued safely.
+   * Transient admission failures are retried for a bounded window. A turn that
+   * cannot admit cancellation continues normally. The event stream remains
+   * attached through the turn boundary so the session can be continued safely.
    */
   stop(): void {
     if (this.#status !== "streaming" && this.#status !== "submitted") {
       return;
     }
 
-    this.#cancelRequested = true;
-    this.#requestTurnCancellation(this.#operationId);
+    const turn = this.#activeTurn;
+    if (turn === undefined || turn.cancellation !== "idle") {
+      return;
+    }
+
+    turn.cancellation = "requested";
+    this.#pumpCancellation(turn);
   }
 
-  /** @internal Aborts local transport during framework lifecycle cleanup. */
-  dispose(): void {
-    this.#abortController?.abort();
+  /**
+   * Detaches this store's active local transport without cancelling durable
+   * server work.
+   *
+   * Detachment is not terminal: the session, subscribers, and callbacks remain
+   * available, and the store can send again after the active send finishes
+   * unwinding. Normal lifecycle callbacks still run for that aborted send.
+   * Framework bindings call this automatically during lifecycle cleanup.
+   */
+  detach(): void {
+    this.#activeTurn?.abort.abort();
   }
 
   reset(): void {
-    this.#invalidateOperation();
-    this.dispose();
-    this.#abortController = undefined;
-    this.#activeTurnId = undefined;
-    this.#cancellationError = undefined;
-    this.#cancelRequested = false;
-    this.#cancelSentTurnId = undefined;
+    const turn = this.#activeTurn;
+    this.#activeTurn = undefined;
+    turn?.abort.abort();
     this.#session = this.#createSession?.() ?? this.#session;
     this.#events = [];
     this.#seenEvents = createEventDeduper();
@@ -293,66 +305,39 @@ export class EveAgentStore<TData> {
     return this.#createSession();
   }
 
-  #startOperation(): number {
-    this.#operationId += 1;
-    return this.#operationId;
+  #isActiveTurn(turn: ActiveTurn): boolean {
+    return this.#activeTurn === turn;
   }
 
-  #invalidateOperation(): void {
-    this.#operationId += 1;
-  }
-
-  #isCurrentOperation(operationId: number): boolean {
-    return this.#operationId === operationId;
-  }
-
-  #observeTurnLifecycle(event: MessageStreamEvent, operationId: number): void {
+  #observeTurnLifecycle(event: MessageStreamEvent, turn: ActiveTurn): void {
     if (event.type === "turn.started") {
-      this.#activeTurnId = event.data.turnId;
-      this.#requestTurnCancellation(operationId);
+      turn.turnId = event.data.turnId;
+      this.#pumpCancellation(turn);
       return;
     }
 
     if (isCurrentTurnBoundaryEvent(event)) {
-      const cancellationError = this.#cancellationError;
-      if (
-        cancellationError !== undefined &&
-        cancellationError.turnId === this.#activeTurnId &&
-        this.#error === cancellationError.error
-      ) {
-        this.#error = undefined;
-      }
-
-      this.#activeTurnId = undefined;
-      this.#cancellationError = undefined;
-      this.#cancelRequested = false;
-      this.#cancelSentTurnId = undefined;
+      // A response stream covers exactly one turn. Clearing the id prevents a
+      // late cancellation response from affecting the next send; the remaining
+      // cancellation state is discarded when this stream finishes.
+      turn.turnId = undefined;
     }
   }
 
-  #requestTurnCancellation(operationId: number): void {
-    const turnId = this.#activeTurnId;
-    if (!this.#cancelRequested || turnId === undefined || this.#cancelSentTurnId === turnId) {
+  #pumpCancellation(turn: ActiveTurn): void {
+    const turnId = turn.turnId;
+    if (turn.cancellation !== "requested" || turnId === undefined) {
       return;
     }
 
-    this.#cancelSentTurnId = turnId;
-    void this.#session.cancel({ turnId }).catch((error: unknown) => {
-      if (
-        !this.#isCurrentOperation(operationId) ||
-        this.#activeTurnId !== turnId ||
-        this.#cancelSentTurnId !== turnId
-      ) {
-        return;
+    turn.cancellation = "sending";
+    void cancelTurnUntilAdmitted({
+      cancel: () => this.#session.cancel({ turnId }),
+      isActive: () => this.#isActiveTurn(turn) && turn.turnId === turnId,
+    }).then((accepted) => {
+      if (this.#isActiveTurn(turn) && turn.turnId === turnId) {
+        turn.cancellation = accepted ? "accepted" : "idle";
       }
-
-      this.#cancelRequested = false;
-      this.#cancelSentTurnId = undefined;
-      const cancellationError = toError(error);
-      this.#cancellationError = { error: cancellationError, turnId };
-      this.#error = cancellationError;
-      this.#callbacks.onError?.(cancellationError);
-      this.#publish();
     });
   }
 

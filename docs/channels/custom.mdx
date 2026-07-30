@@ -74,7 +74,7 @@ export default defineChannel({
 });
 ```
 
-Both result statuses are successful. `"accepted"` means the cancellation request was consumed, not that the observed turn will cancel; confirmation is `turn.cancelled` followed by `session.waiting` on the event stream. `"no_active_turn"` covers an unknown token and a session with nothing to cancel — idle, parked, or already completed.
+Both result statuses are successful. `"accepted"` means a cancellation hook accepted the request, not that the observed turn will cancel; confirmation is `turn.cancelled` followed by `session.waiting` on the event stream. `"no_active_turn"` means no cancellation hook admitted the request. This can be transient during turn startup or permanent for an unknown token, a parked session, or an already-completed turn.
 
 Semantics:
 

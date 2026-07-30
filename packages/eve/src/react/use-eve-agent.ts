@@ -41,7 +41,7 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
   readonly reset: () => void;
   /** Sends a turn (message, HITL responses, and/or client context). Rejects if a turn is already in flight. */
   readonly send: <TOutput = unknown>(input: SendTurnPayload<TOutput>) => Promise<void>;
-  /** Durably cancels the active turn while keeping its event stream attached. */
+  /** Requests best-effort cancellation while keeping the event stream attached. */
   readonly stop: () => void;
 }
 
@@ -153,7 +153,7 @@ export function useEveAgent<TData>(
     () => store.snapshot,
   );
 
-  useEffect(() => () => store.dispose(), [store]);
+  useEffect(() => () => store.detach(), [store]);
 
   const reset = useCallback(() => store.reset(), [store]);
   const send = useCallback(

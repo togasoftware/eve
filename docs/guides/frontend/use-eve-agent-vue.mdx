@@ -116,7 +116,7 @@ The find-and-answer flow is the same across every framework. The [React hook ref
 
 ## Stop, reset, and resume
 
-`stop()` durably cancels the active turn and keeps its stream attached through the cancellation boundary. When the component scope is disposed, it aborts only its local request or stream while allowing durable server work to continue. `reset()` also detaches locally, wipes local state, and starts a fresh session. To survive a reload, pass `initialSession` to restore a saved session and `onSessionChange` to persist the cursor as it moves:
+`stop()` requests best-effort cancellation of the active turn and keeps its stream attached through the cancellation boundary. A turn that cannot admit cancellation continues normally. When the component scope is disposed, it detaches only its local request or stream while allowing durable server work to continue. `reset()` also detaches locally, wipes local state, and starts a fresh session. Restoring a session does not attach the binding to a turn that was already running. To survive a reload, pass `initialSession` to restore a saved session and `onSessionChange` to persist the cursor as it moves:
 
 ```ts
 const agent = useEveAgent({

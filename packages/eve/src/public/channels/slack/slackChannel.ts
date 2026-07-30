@@ -320,8 +320,8 @@ export interface SlackEventResetOptions extends SlackSessionTarget, SlackResetOp
  */
 export interface SlackInboundEventContext {
   /**
-   * Cancels the active turn for a Slack thread. Both `"accepted"` and
-   * `"no_active_turn"` are successful outcomes.
+   * Cancels the active turn for a Slack thread. `"no_active_turn"` is a
+   * successful outcome that can be transient during turn startup.
    */
   readonly cancel: (options: SlackEventCancelOptions) => Promise<CancelTurnResult>;
   /** The complete signed Events API callback envelope. */
@@ -349,8 +349,8 @@ export interface SlackInboundEventContext {
  */
 export interface SlackInboundMessageContext extends SlackContext {
   /**
-   * Cancels the active turn in this message's thread. Both `"accepted"` and
-   * `"no_active_turn"` are successful outcomes.
+   * Cancels the active turn in this message's thread. `"no_active_turn"` is a
+   * successful outcome that can be transient during turn startup.
    */
   cancel(options?: SlackCancelOptions): Promise<CancelTurnResult>;
   /** Returns whether this message belongs to a thread with an active eve session. */
@@ -367,8 +367,8 @@ export interface SlackInboundMessageContext extends SlackContext {
 /** Interaction-scoped context handed to `slackChannel({ onInteraction })`. */
 export interface SlackInteractionContext extends SlackContext {
   /**
-   * Cancels the active turn in the interaction's thread. Both `"accepted"` and
-   * `"no_active_turn"` are successful outcomes.
+   * Cancels the active turn in the interaction's thread. `"no_active_turn"` is
+   * a successful outcome that can be transient during turn startup.
    */
   cancel(options?: SlackCancelOptions): Promise<CancelTurnResult>;
   /**

@@ -19,6 +19,7 @@ import {
   Client,
   ClientSession,
 } from "#client/index.js";
+import { cancelTurnUntilAdmitted } from "#client/cancel-turn-until-admitted.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
@@ -105,20 +106,6 @@ export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
-/**
- * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
- * window (locally the cancel hook is claimed well under a second after the
- * send is accepted) without hammering the cancel route.
- */
-const turnCancelRetryDelayMs = 250;
-const turnCancelAttempts = 8;
-
-async function delayMs(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
 
 export type AgentTUIStreamResult = {
   events: AsyncIterable<AgentTUIStreamEvent> | ReadableStream<AgentTUIStreamEvent>;
@@ -1148,24 +1135,17 @@ export class EveTUIRunner {
    * submitted message into the prompt instead of losing it.
    * Single-flight per turn: repeated Esc presses join the running loop.
    */
-  async #requestTurnCancellation(turnState: AgentTUITurnState): Promise<void> {
+  async #cancelStreamingTurn(turnState: AgentTUITurnState): Promise<void> {
     if (turnState.cancelInFlight === true) return;
     turnState.cancelInFlight = true;
     try {
-      for (let attempt = 0; attempt < turnCancelAttempts; attempt += 1) {
-        if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
-        const turnId = turnState.turnId;
-        try {
-          const result = await this.#session.cancel(turnId === undefined ? undefined : { turnId });
-          // Accepted means the turn's cancellation hook consumed the
-          // request; the turn settles at its next safe boundary.
-          if (result.status === "accepted") return;
-        } catch {
-          // No accepted session yet or a transport failure — retry below;
-          // Ctrl+C remains the hard client-side interrupt.
-        }
-        await delayMs(turnCancelRetryDelayMs);
-      }
+      await cancelTurnUntilAdmitted({
+        cancel: () => {
+          const turnId = turnState.turnId;
+          return this.#session.cancel(turnId === undefined ? undefined : { turnId });
+        },
+        isActive: () => turnState.boundaryEvent === undefined && turnState.aborted !== true,
+      });
     } finally {
       turnState.cancelInFlight = false;
     }
@@ -1195,7 +1175,7 @@ export class EveTUIRunner {
         abort();
       },
       cancel: () => {
-        void this.#requestTurnCancellation(turnState);
+        void this.#cancelStreamingTurn(turnState);
       },
       events: eveEventsToTUIStream({
         events,

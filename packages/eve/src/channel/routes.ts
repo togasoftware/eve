@@ -125,10 +125,11 @@ export interface CancelOptions {
  * Requests cancellation of the active turn on the session that owns the
  * continuation token. Never starts a session, sends input, or clears history.
  *
- * Both statuses are successful: `"accepted"` means the request was consumed,
- * and `"no_active_turn"` covers an unknown token and a session with nothing
- * to cancel. Confirmation is `turn.cancelled` followed by `session.waiting`
- * on the event stream.
+ * Both statuses are successful: `"accepted"` means the request was consumed.
+ * `"no_active_turn"` means no cancellation hook admitted it, which can be
+ * transient during turn startup or permanent for an unknown token or parked
+ * session. Confirmation is `turn.cancelled` followed by `session.waiting` on
+ * the event stream.
  */
 export type CancelFn = (options: CancelOptions) => Promise<CancelTurnResult>;
 

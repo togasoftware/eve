@@ -136,8 +136,9 @@ export interface Agent {
    *
    * `"accepted"` means a cancellation hook accepted the request; observe
    * the event stream for `turn.cancelled` to confirm that it affected the
-   * current turn. `"no_active_turn"` means no cancellable hook was active.
-   * Both outcomes are successful.
+   * current turn. `"no_active_turn"` means no cancellation hook admitted the
+   * request and can be transient during turn startup. Both outcomes are
+   * successful.
    */
   cancelTurn(input: CancelTurnInput): Promise<CancelTurnResult>;
   /**

@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-`useEveAgent().stop()` now safely cancels the active durable turn and keeps consuming events through its cancellation boundary. Framework lifecycle cleanup still detaches locally without cancelling server work.
+`useEveAgent().stop()` now requests best-effort durable cancellation of the active turn and keeps streaming until the server settles instead of only detaching locally. Framework lifecycle cleanup still detaches local transport without cancelling server work.

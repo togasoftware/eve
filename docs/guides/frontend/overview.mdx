@@ -72,7 +72,7 @@ export function Chat() {
 | `events`  | Raw eve stream events for this session.                                        |
 | `session` | Serializable session cursor (`sessionId`, `continuationToken`, `streamIndex`). |
 | `send`    | Send text or the full turn payload (multi-part messages, HITL responses).      |
-| `stop`    | Durably cancel the active turn while keeping its event stream attached.        |
+| `stop`    | Request best-effort cancellation while keeping its event stream attached.      |
 | `reset`   | Clear local events, data, errors, and the local session cursor.                |
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
@@ -99,7 +99,7 @@ await agent.send({
 });
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to durably cancel the active turn. The hook keeps reading until the turn settles as `turn.cancelled` followed by `session.waiting`, so the same conversation can continue safely. An early stop is queued until eve identifies the turn, and a late stop cannot cancel a newer turn.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and `status` moves from `ready` to `submitted` to `streaming` and back. Call `stop()` to request cancellation of the active turn started by this binding. The hook retries transient admission failures and keeps reading until the turn settles as `turn.cancelled` followed by `session.waiting`, so the same conversation can continue safely. An early stop is queued until eve identifies the turn, and a late stop cannot cancel a newer turn. Cancellation is best-effort: a turn that cannot admit cancellation continues normally. Restoring a session does not attach the binding to a turn that was already running.
 
 Unmounting the binding aborts only its local request or stream; durable server work continues. `reset()` also detaches locally, clears local state, and makes the next send start a fresh durable session.
 

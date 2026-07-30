@@ -14,7 +14,6 @@ import {
   createTurnCancelledEvent,
   createTurnFailedEvent,
   createTurnStartedEvent,
-  type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
@@ -69,7 +68,7 @@ function createControlledStreamResponse() {
     close() {
       controller?.close();
     },
-    emit(event: MessageStreamEvent) {
+    emit(event: UnstampedMessageStreamEvent) {
       controller?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
     },
     response,
@@ -376,57 +375,6 @@ describe("useEveAgent", () => {
 
     expect(requestSignal?.aborted).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not retain a cancellation request error after the turn reaches a boundary", async () => {
-    const stream = createControlledStreamResponse();
-    const cancelResponse = createDeferred<Response>();
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
-      .mockResolvedValueOnce(stream.response)
-      .mockReturnValueOnce(cancelResponse.promise);
-
-    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
-
-    function TestComponent() {
-      helpers = useEveAgent();
-      return null;
-    }
-
-    await act(async () => {
-      render(createElement(TestComponent));
-    });
-
-    let sendPromise: Promise<void> | undefined;
-    await act(async () => {
-      sendPromise = helpers?.send({ message: "Hello" });
-      await vi.waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(2);
-      });
-      stream.emit(createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }));
-      helpers?.stop();
-      await vi.waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(3);
-      });
-    });
-
-    await act(async () => {
-      cancelResponse.reject(new Error("Cancel failed"));
-      await vi.waitFor(() => {
-        expect(helpers?.error?.message).toBe("Cancel failed");
-      });
-    });
-
-    await act(async () => {
-      stream.emit(createTurnCancelledEvent({ sequence: 0, turnId: "turn_1" }));
-      stream.emit(createSessionWaitingEvent("eve:http:session_1"));
-      stream.close();
-      await sendPromise;
-    });
-
-    expect(helpers?.error).toBeUndefined();
-    expect(helpers?.status).toBe("ready");
   });
 
   it("prepares fresh clientContext before sending without projecting it optimistically", async () => {

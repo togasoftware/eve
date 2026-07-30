@@ -50,7 +50,7 @@ export interface UseEveAgentReturn<TData> {
   readonly session: ComputedRef<SessionState>;
   /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
   readonly status: ComputedRef<UseEveAgentStatus>;
-  /** Durably cancel the active turn while keeping its event stream attached. */
+  /** Requests best-effort cancellation while keeping the event stream attached. */
   readonly stop: () => void;
 }
 
@@ -168,7 +168,7 @@ export function useEveAgent<TData>(
 
     onScopeDispose(() => {
       unsubscribe();
-      store.dispose();
+      store.detach();
     });
   }
 
