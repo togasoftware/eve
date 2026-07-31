@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import type { Asker, Question } from "#setup/ask.js";
 
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createIntegrationSetupUi } from "../shared/ui.js";
@@ -18,11 +19,10 @@ function deps(): LinearSetupDeps {
   };
 }
 
-function recommendedAsker() {
-  return {
-    ask: vi.fn(async (question: { recommended?: unknown }) => question.recommended),
-    askMany: vi.fn(),
-  };
+function recommendedAsker(): Asker {
+  const ask = async <T>(question: Question<T>): Promise<T> => question.recommended as T;
+  const askMany: Asker["askMany"] = async () => [];
+  return { ask, askMany };
 }
 
 describe("Linear setup", () => {
