@@ -140,6 +140,8 @@ export async function dispatchRuntimeActionsStep(input: {
   // Read here, not in the child: trace state is scoped to one session's
   // context, so this is the last place the parent's window is visible.
   const parentTraceContext = readSessionTraceContext(input.serializedContext, session.sessionId);
+  const persistentSessions =
+    bundle.resolvedAgent.config.experimental?.subagentPersistentSessions === true;
   // A corrupt handle store throws; surface that before anything dispatches.
   // A mid-loop throw after a sibling started would durably replay the whole
   // batch and re-dispatch that sibling.
@@ -192,6 +194,7 @@ export async function dispatchRuntimeActionsStep(input: {
             initiatorAuth,
             parentContinuationToken: input.parentContinuationToken,
             parentTraceContext,
+            persistentSessions,
             session,
             target: entry.target,
           });
@@ -338,6 +341,7 @@ async function startSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
   readonly target: DispatchStartTarget;
 }): Promise<DispatchOutcome> {
@@ -356,6 +360,7 @@ async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext: input.parentTraceContext,
+        persistentSessions: input.persistentSessions,
         session: input.session,
         source: input.target.source,
       });
@@ -369,6 +374,7 @@ async function startSubagent(input: {
         currentSession: input.currentSession,
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
+        persistentSessions: input.persistentSessions,
         session: input.session,
       });
     default: {
@@ -423,6 +429,7 @@ async function startLocalSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
 }): Promise<DispatchOutcome> {
@@ -442,6 +449,7 @@ async function startLocalSubagent(input: {
     initiatorAuth: input.initiatorAuth,
     parentContinuationToken: input.parentContinuationToken,
     parentTraceContext: input.parentTraceContext,
+    persistentSessions: input.persistentSessions,
     session: input.session,
     source,
   });
@@ -522,6 +530,7 @@ async function startRemoteSubagent(input: {
   readonly currentSession: RuntimeSession;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
+  readonly persistentSessions: boolean;
   readonly session: RuntimeSession;
 }): Promise<DispatchOutcome> {
   const { action } = input;
@@ -573,6 +582,7 @@ async function startRemoteSubagent(input: {
       callbackBaseUrl,
       callbackToken: input.parentContinuationToken,
       initiatorAuth: input.initiatorAuth,
+      persistentSessions: input.persistentSessions,
       remote: resolvedRemote,
       session: input.session,
     });

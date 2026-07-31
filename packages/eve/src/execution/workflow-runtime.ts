@@ -223,6 +223,7 @@ export function createWorkflowRuntime(config: {
     async deliver(input: DeliverInput): Promise<{ sessionId: string }> {
       const hookPayload: Extract<HookPayload, { kind: "deliver" }> = {
         auth: input.auth,
+        caller: input.caller,
         kind: "deliver",
         payloads: [input.payload],
         requestId: input.requestId,

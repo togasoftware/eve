@@ -1388,6 +1388,7 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toBeUndefined();
     expect(events.map((event) => event.type)).toEqual([
       "session.started",
       "turn.started",
@@ -1744,6 +1745,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Hi" });
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: { title: "Done" } });
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -1898,6 +1900,10 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Hi" });
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({
+      isError: true,
+      output: "The agent could not produce a result matching the requested schema.",
+    });
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -2107,6 +2113,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "What's the weather in NY?" });
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "It is 41 F in New York right now." });
     expect(result.session.history).toEqual([
       { content: "What's the weather in NY?", role: "user" },
       {
@@ -2314,6 +2321,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session);
 
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "The result is 42." });
     expect(result.session.history).toEqual([
       { content: "prior message", role: "user" },
       { content: "The result is 42.", role: "assistant" },
@@ -3666,6 +3674,7 @@ describe("createToolLoopHarness", () => {
     // session parks (`next: null`) so the user can follow up in the
     // same thread rather than the whole run being torn down.
     expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ isError: true, output: "Model blew up" });
 
     const types = events.map((e) => e.type);
     expect(types).toContain("session.started");
@@ -3781,14 +3790,43 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("task", emit));
+    const ctx = new ContextContainer();
+    setDelegatedParent(ctx);
 
-    const result = await runStep(createTestSession(), { message: "Delegated task" });
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Delegated task" }),
+    );
 
-    // The task's terminal result must be marked as an error with the
-    // failure message as output, mirroring the non-terminal task-mode
-    // failure shape. Today the terminal branch returns
-    // `{ done: true, output: "" }`, which the parent driver treats as a
-    // successful delegation with empty output.
+    // The terminal result must be marked as an error with the failure
+    // message as output, matching the non-terminal task-mode failure shape.
+    expect(result.next).toMatchObject({
+      done: true,
+      isError: true,
+      output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("step.failed");
+    expect(types).toContain("turn.failed");
+    expect(types).toContain("session.failed");
+  });
+
+  it("surfaces a terminal model-call error to a delegated conversation caller", async () => {
+    const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
+      name: "AI_APICallError",
+      statusCode: 404,
+    });
+    setupMockAgentError(error);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const ctx = new ContextContainer();
+    setDelegatedParent(ctx);
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Delegated turn" }),
+    );
+
     expect(result.next).toMatchObject({
       done: true,
       isError: true,
@@ -5248,6 +5286,7 @@ describe("createToolLoopHarness", () => {
       );
 
       expect(result.next).toBeNull();
+      expect(result.settledTurn).toBeUndefined();
       expect(getPendingAuthorization(result.session.state)).toEqual({
         challenges: full.challenges,
       });
@@ -5346,6 +5385,7 @@ describe("createToolLoopHarness", () => {
       );
 
       expect(result.next).toBeNull();
+      expect(result.settledTurn).toBeUndefined();
       expect(getPendingAuthorization(result.session.state)).toEqual({
         challenges: full.challenges,
       });
