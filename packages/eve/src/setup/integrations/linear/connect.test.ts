@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelSetupLog } from "#setup/cli/index.js";
-import { parseCreatedLinearConnector, provisionLinearConnector } from "./connect.js";
+import {
+  findLinearConnector,
+  parseCreatedLinearConnector,
+  provisionLinearConnector,
+} from "./connect.js";
 
 function log(): ChannelSetupLog {
   return {
@@ -27,24 +31,26 @@ describe("Linear Connect provisioning", () => {
     ).toEqual({ id: "scl_linear", uid: "linear/agent" });
   });
 
-  it("explains how to replace a connector that lacks Agent Session triggers", async () => {
+  it("finds an existing Linear connector", async () => {
     const runVercelCaptureStdout = vi.fn(async () => ({
-      ok: false as const,
-      stdout: "",
-      stderr: 'Error: A connector named "agent-linear" already exists. (409)',
+      ok: true as const,
+      stdout: JSON.stringify({
+        connectors: [
+          { id: "scl_other", uid: "linear/other" },
+          { id: "scl_agent", uid: "linear/agent" },
+        ],
+      }),
+      stderr: "",
     }));
 
     await expect(
-      provisionLinearConnector({
-        log: log(),
+      findLinearConnector({
         project: { orgId: "team_123", projectId: "prj_123" },
         projectRoot: "/project",
         slug: "agent",
         deps: { runVercel: vi.fn(), runVercelCaptureStdout },
       }),
-    ).rejects.toThrow(
-      "vercel connect remove linear/agent --disconnect-all --yes --scope team_123",
-    );
+    ).resolves.toEqual({ id: "scl_agent", uid: "linear/agent" });
   });
 
   it("creates the connector and replaces its trigger", async () => {

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import { select, text } from "#setup/ask.js";
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import { openUrl } from "#setup/primitives/open-url.js";
 import { deriveSlackConnectorSlug, normalizeSlackConnectorSlug } from "#setup/scaffold/index.js";
@@ -11,19 +12,28 @@ import type {
   IntegrationSetupResult,
   SetupIntegration,
 } from "../types.js";
-import { provisionLinearConnector } from "./connect.js";
+import {
+  attachLinearConnector,
+  findLinearConnector,
+  provisionLinearConnector,
+  type LinearConnectorRef,
+} from "./connect.js";
 
 export interface LinearSetupDeps {
+  attachConnector: typeof attachLinearConnector;
   deriveConnectorSlug: typeof deriveSlackConnectorSlug;
   ensureVercelProject: typeof ensureVercelProject;
+  findConnector: typeof findLinearConnector;
   openUrl: typeof openUrl;
   provisionConnector: typeof provisionLinearConnector;
   writeTextFile: typeof writeTextFile;
 }
 
 const defaultDeps: LinearSetupDeps = {
+  attachConnector: attachLinearConnector,
   deriveConnectorSlug: deriveSlackConnectorSlug,
   ensureVercelProject,
+  findConnector: findLinearConnector,
   openUrl,
   provisionConnector: provisionLinearConnector,
   writeTextFile,
@@ -43,6 +53,78 @@ export default linearChannel({
   credentials: connectLinearCredentials(${JSON.stringify(uid)}),
 });
 `;
+}
+
+async function chooseConnector(
+  context: IntegrationSetupContext,
+  deps: LinearSetupDeps,
+  project: Awaited<ReturnType<typeof ensureVercelProject>>,
+): Promise<LinearConnectorRef | undefined> {
+  const defaultSlug = linearSafeConnectorSlug(await deps.deriveConnectorSlug(context.appRoot));
+  const slug = linearSafeConnectorSlug(
+    await context.ui.asker.ask(
+      text({
+        key: "linear.connector-name",
+        message: "Name your Linear agent",
+        recommended: defaultSlug,
+        validate: (value) =>
+          value.trim().length === 0 ? "A Linear agent name is required." : null,
+      }),
+    ),
+  );
+  const existing = await deps.findConnector({
+    project,
+    projectRoot: context.appRoot,
+    slug,
+    signal: context.signal,
+  });
+  if (existing !== undefined) {
+    const choice = await context.ui.asker.ask(
+      select({
+        key: "linear.existing-connector",
+        message: `A Linear connector named "${slug}" already exists. What would you like to do?`,
+        options: [
+          { id: "reuse", label: "Reuse existing connector", value: "reuse" as const },
+          { id: "new", label: "Create a new connector", value: "new" as const },
+          { id: "exit", label: "Exit setup", value: "exit" as const },
+        ],
+        recommended: "reuse" as const,
+      }),
+    );
+    if (choice === "exit") return undefined;
+    if (choice === "reuse") {
+      await deps.attachConnector({
+        connector: existing,
+        log: context.ui.prompter.log,
+        project,
+        projectRoot: context.appRoot,
+        signal: context.signal,
+      });
+      return existing;
+    }
+  }
+
+  const connectorSlug =
+    existing === undefined
+      ? slug
+      : linearSafeConnectorSlug(
+          await context.ui.asker.ask(
+            text({
+              key: "linear.new-connector-name",
+              message: "Name the new Linear agent",
+              recommended: `${slug}-2`,
+              validate: (value) =>
+                value.trim().length === 0 ? "A Linear agent name is required." : null,
+            }),
+          ),
+        );
+  return deps.provisionConnector({
+    log: context.ui.prompter.log,
+    project,
+    projectRoot: context.appRoot,
+    slug: connectorSlug,
+    signal: context.signal,
+  });
 }
 
 /** Runs guided Linear Agent Session connector and channel setup. */
@@ -65,30 +147,8 @@ export async function setupLinear(
       prompter: context.ui.prompter,
       signal: context.signal,
     });
-    const slug = linearSafeConnectorSlug(await deps.deriveConnectorSlug(context.appRoot));
-    let connector;
-    for (;;) {
-      try {
-        connector = await deps.provisionConnector({
-          log: context.ui.prompter.log,
-          project,
-          projectRoot: context.appRoot,
-          slug,
-          signal: context.signal,
-        });
-        break;
-      } catch (error) {
-        if (error instanceof WizardCancelledError) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        context.ui.prompter.log.warning(message);
-        const retry = await context.ui.confirm({
-          key: "linear.retry-connector",
-          message: "Linear connector setup did not complete. Try again?",
-          recommended: true,
-        });
-        if (!retry) return { kind: "cancelled" };
-      }
-    }
+    const connector = await chooseConnector(context, deps, project);
+    if (connector === undefined) return { kind: "cancelled" };
     await deps.writeTextFile(
       join(context.appRoot, "agent/channels/linear.ts"),
       connectTemplate(connector.uid),

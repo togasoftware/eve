@@ -8,11 +8,20 @@ import { linearSafeConnectorSlug, setupLinear, type LinearSetupDeps } from "./se
 
 function deps(): LinearSetupDeps {
   return {
+    attachConnector: vi.fn(async () => {}),
     deriveConnectorSlug: vi.fn(async () => "agent" as never),
     ensureVercelProject: vi.fn(async () => ({ orgId: "team-id", projectId: "project-id" })),
+    findConnector: vi.fn(async () => undefined),
     openUrl: vi.fn(),
     provisionConnector: vi.fn(async () => ({ id: "scl_linear", uid: "linear/agent" })),
     writeTextFile: vi.fn(async () => {}),
+  };
+}
+
+function recommendedAsker() {
+  return {
+    ask: vi.fn(async (question: { recommended?: unknown }) => question.recommended),
+    askMany: vi.fn(),
   };
 }
 
@@ -31,10 +40,7 @@ describe("Linear setup", () => {
         {
           appRoot: "/project",
           environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
-          ui: createIntegrationSetupUi({
-            asker: { ask: vi.fn(), askMany: vi.fn() },
-            prompter: fake.prompter,
-          }),
+          ui: createIntegrationSetupUi({ asker: recommendedAsker(), prompter: fake.prompter }),
         },
         effects,
       ),
@@ -51,16 +57,36 @@ describe("Linear setup", () => {
     expect(effects.openUrl).toHaveBeenCalledOnce();
   });
 
+  it("reuses an existing connector when selected", async () => {
+    const fake = createFakePrompter();
+    const effects = deps();
+    vi.mocked(effects.findConnector).mockResolvedValue({ id: "scl_existing", uid: "linear/agent" });
+    const asker = recommendedAsker();
+
+    await expect(
+      setupLinear(
+        {
+          appRoot: "/project",
+          environment: integrationSetupEnvironment("authenticated", { kind: "unresolved" }),
+          ui: createIntegrationSetupUi({ asker, prompter: fake.prompter }),
+        },
+        effects,
+      ),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(effects.attachConnector).toHaveBeenCalledWith(
+      expect.objectContaining({ connector: { id: "scl_existing", uid: "linear/agent" } }),
+    );
+    expect(effects.provisionConnector).not.toHaveBeenCalled();
+  });
+
   it("requires an authenticated Vercel CLI", async () => {
     const fake = createFakePrompter();
     await expect(
       setupLinear({
         appRoot: "/project",
         environment: integrationSetupEnvironment("logged-out", { kind: "unresolved" }),
-        ui: createIntegrationSetupUi({
-          asker: { ask: vi.fn(), askMany: vi.fn() },
-          prompter: fake.prompter,
-        }),
+        ui: createIntegrationSetupUi({ asker: recommendedAsker(), prompter: fake.prompter }),
       }),
     ).rejects.toThrow("vercel login");
   });

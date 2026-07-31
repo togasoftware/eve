@@ -34,6 +34,76 @@ export function parseCreatedLinearConnector(stdout: string): LinearConnectorRef 
   }
 }
 
+/** Finds the canonical Linear connector if it already exists in this Vercel team. */
+export async function findLinearConnector(input: {
+  project: VercelProjectReference;
+  projectRoot: string;
+  slug: string;
+  signal?: AbortSignal;
+  deps?: ProvisionLinearConnectorDeps;
+}): Promise<LinearConnectorRef | undefined> {
+  const deps = input.deps ?? { runVercel, runVercelCaptureStdout };
+  const result = await deps.runVercelCaptureStdout(
+    [
+      "connect",
+      "list",
+      "--all-projects",
+      "--service",
+      "linear",
+      "-F",
+      "json",
+      "--scope",
+      input.project.orgId,
+    ],
+    { cwd: input.projectRoot, nonInteractive: true, signal: input.signal },
+  );
+  if (!result.ok) return undefined;
+  try {
+    const parsed = JSON.parse(result.stdout) as { connectors?: unknown };
+    if (!Array.isArray(parsed.connectors)) return undefined;
+    const expectedUid = `linear/${input.slug}`;
+    const connector = parsed.connectors.find(
+      (value): value is Record<string, unknown> =>
+        typeof value === "object" && value !== null && (value as { uid?: unknown }).uid === expectedUid,
+    );
+    return typeof connector?.id === "string" ? { id: connector.id, uid: expectedUid } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Attaches a Linear connector's verified events to this agent's production route. */
+export async function attachLinearConnector(input: {
+  connector: LinearConnectorRef;
+  log: ChannelSetupLog;
+  project: VercelProjectReference;
+  projectRoot: string;
+  signal?: AbortSignal;
+  deps?: ProvisionLinearConnectorDeps;
+}): Promise<void> {
+  const deps = input.deps ?? { runVercel, runVercelCaptureStdout };
+  const onOutput = createPromptCommandOutput(input.log);
+  const attachment = await withPhase(input.log, "Connecting Linear Agent Sessions...", () =>
+    replaceConnectTrigger({
+      connectorUid: input.connector.uid,
+      projectRoot: input.projectRoot,
+      projectId: input.project.projectId,
+      orgId: input.project.orgId,
+      environment: "production",
+      triggerPath: LINEAR_TRIGGER_PATH,
+      onOutput,
+      signal: input.signal,
+      deps,
+    }),
+  );
+  input.signal?.throwIfAborted();
+  if (attachment.state !== "attached") {
+    throw new Error(
+      `Linear connector was found, but its trigger could not be attached. Run \`vercel connect attach ${input.connector.uid} --project ${input.project.projectId} --environment production --triggers --trigger-path ${LINEAR_TRIGGER_PATH} --yes --scope ${input.project.orgId}\`.`,
+    );
+  }
+}
+
 /** Creates a Linear connector and routes its verified Agent Session events to eve. */
 export async function provisionLinearConnector(input: {
   log: ChannelSetupLog;
@@ -74,36 +144,11 @@ export async function provisionLinearConnector(input: {
     const detail = [result.stderr, result.stdout].find(
       (value): value is string => value !== undefined && value.trim().length > 0,
     );
-    if (detail?.includes("already exists")) {
-      throw new Error(
-        `A Linear connector named \`${input.slug}\` already exists. Remove it with \`vercel connect remove linear/${input.slug} --disconnect-all --yes --scope ${input.project.orgId}\`, then choose Try again to recreate it with AgentSessionEvent triggers.`,
-      );
-    }
-    throw new Error(
-      detail ? `Linear connector creation failed:\n${detail}` : "Linear connector creation failed.",
-    );
+    throw new Error(detail ? `Linear connector creation failed:\n${detail}` : "Linear connector creation failed.");
   }
   const connector = parseCreatedLinearConnector(result.stdout);
   if (connector === undefined) throw new Error("Vercel returned an invalid Linear connector.");
 
-  const attachment = await withPhase(input.log, "Connecting Linear Agent Sessions...", () =>
-    replaceConnectTrigger({
-      connectorUid: connector.uid,
-      projectRoot: input.projectRoot,
-      projectId: input.project.projectId,
-      orgId: input.project.orgId,
-      environment: "production",
-      triggerPath: LINEAR_TRIGGER_PATH,
-      onOutput,
-      signal: input.signal,
-      deps,
-    }),
-  );
-  input.signal?.throwIfAborted();
-  if (attachment.state !== "attached") {
-    throw new Error(
-      `Linear connector was created, but its trigger could not be attached. Run \`vercel connect attach ${connector.uid} --project ${input.project.projectId} --environment production --triggers --trigger-path ${LINEAR_TRIGGER_PATH} --yes --scope ${input.project.orgId}\`.`,
-    );
-  }
+  await attachLinearConnector({ ...input, connector, deps });
   return connector;
 }
