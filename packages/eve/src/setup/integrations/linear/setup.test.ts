@@ -4,7 +4,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 
 import { integrationSetupEnvironment } from "../shared/environment.js";
 import { createIntegrationSetupUi } from "../shared/ui.js";
-import { setupLinear, type LinearSetupDeps } from "./setup.js";
+import { linearSafeConnectorSlug, setupLinear, type LinearSetupDeps } from "./setup.js";
 
 function deps(): LinearSetupDeps {
   return {
@@ -17,6 +17,11 @@ function deps(): LinearSetupDeps {
 }
 
 describe("Linear setup", () => {
+  it("removes Linear from managed app names", () => {
+    expect(linearSafeConnectorSlug("eve-linear-agent")).toBe("eve-agent");
+    expect(linearSafeConnectorSlug("linear")).toBe("agent");
+  });
+
   it("provisions Connect, routes Agent Session events, and scaffolds the channel", async () => {
     const fake = createFakePrompter();
     const effects = deps();
@@ -35,6 +40,9 @@ describe("Linear setup", () => {
       ),
     ).resolves.toMatchObject({ kind: "done" });
 
+    expect(effects.provisionConnector).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "agent" }),
+    );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/linear.ts",
       expect.stringContaining('connectLinearCredentials("linear/agent")'),

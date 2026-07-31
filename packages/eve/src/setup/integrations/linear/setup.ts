@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { ensureVercelProject } from "#setup/flows/ensure-vercel-project.js";
 import { openUrl } from "#setup/primitives/open-url.js";
-import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
+import { deriveSlackConnectorSlug, normalizeSlackConnectorSlug } from "#setup/scaffold/index.js";
 import { writeTextFile } from "#setup/scaffold/files.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -28,6 +28,12 @@ const defaultDeps: LinearSetupDeps = {
   provisionConnector: provisionLinearConnector,
   writeTextFile,
 };
+
+/** Linear does not allow its brand name in a managed app's name. */
+export function linearSafeConnectorSlug(slug: string): string {
+  const withoutLinear = slug.replaceAll(/linear/gi, "").replace(/[-_]{2,}/g, "-");
+  return normalizeSlackConnectorSlug(withoutLinear || "agent");
+}
 
 function connectTemplate(uid: string): string {
   return `import { connectLinearCredentials } from "@vercel/connect/eve";
@@ -59,13 +65,30 @@ export async function setupLinear(
       prompter: context.ui.prompter,
       signal: context.signal,
     });
-    const connector = await deps.provisionConnector({
-      log: context.ui.prompter.log,
-      project,
-      projectRoot: context.appRoot,
-      slug: await deps.deriveConnectorSlug(context.appRoot),
-      signal: context.signal,
-    });
+    const slug = linearSafeConnectorSlug(await deps.deriveConnectorSlug(context.appRoot));
+    let connector;
+    for (;;) {
+      try {
+        connector = await deps.provisionConnector({
+          log: context.ui.prompter.log,
+          project,
+          projectRoot: context.appRoot,
+          slug,
+          signal: context.signal,
+        });
+        break;
+      } catch (error) {
+        if (error instanceof WizardCancelledError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        context.ui.prompter.log.warning(message);
+        const retry = await context.ui.confirm({
+          key: "linear.retry-connector",
+          message: "Linear connector setup did not complete. Try again?",
+          recommended: true,
+        });
+        if (!retry) return { kind: "cancelled" };
+      }
+    }
     await deps.writeTextFile(
       join(context.appRoot, "agent/channels/linear.ts"),
       connectTemplate(connector.uid),

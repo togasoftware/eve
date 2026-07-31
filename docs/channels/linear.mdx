@@ -14,9 +14,9 @@ Run the registry setup from the agent directory:
 eve add channel/linear-agent
 ```
 
-The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, provisions an app-scoped Linear Connect client, and replaces its default trigger with `/eve/v1/linear`. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
+The flow checks that the Vercel CLI is authenticated, creates or links a Vercel project when needed, provisions an app-scoped Linear Connect client with `AgentSessionEvent` triggers, and replaces its default trigger with `/eve/v1/linear`. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
 
-Vercel Connect creates the Linear app with the `app:assignable` and `app:mentionable` scopes required for Agent Sessions, receives and verifies `AgentSessionEvent` webhooks, and forwards them to the deployed agent. After deploying, open the Linear app in the Connect dashboard and install it in the workspace where you want to delegate work. Then delegate an issue or mention the agent in a Linear Agent Session.
+Vercel Connect creates the Linear app with the `app:assignable` and `app:mentionable` scopes required for Agent Sessions, subscribes to and verifies `AgentSessionEvent` webhooks, and forwards them to the deployed agent. After deploying, open the Linear app in the Connect dashboard and install it in the workspace where you want to delegate work. Then delegate an issue or mention the agent in Linear.
 
 The generated channel uses Connect-managed credentials:
 

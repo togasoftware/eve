@@ -57,6 +57,8 @@ describe("Linear Connect provisioning", () => {
         "--name",
         "agent",
         "--triggers",
+        "--trigger-event",
+        "AgentSessionEvent",
         "-F",
         "json",
         "--scope",

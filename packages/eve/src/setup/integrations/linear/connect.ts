@@ -54,6 +54,8 @@ export async function provisionLinearConnector(input: {
         "--name",
         input.slug,
         "--triggers",
+        "--trigger-event",
+        "AgentSessionEvent",
         "-F",
         "json",
         "--scope",
