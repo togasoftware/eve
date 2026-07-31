@@ -138,10 +138,6 @@ export async function setupLinear(
     );
   }
   try {
-    context.ui.prompter.note(
-      "Vercel Connect creates a Linear app with the Agent Session scopes and routes verified AgentSessionEvent webhooks to your deployed agent.",
-      "Linear Agent",
-    );
     const project = await deps.ensureVercelProject({
       appRoot: context.appRoot,
       prompter: context.ui.prompter,
