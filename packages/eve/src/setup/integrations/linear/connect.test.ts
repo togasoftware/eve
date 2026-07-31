@@ -27,6 +27,26 @@ describe("Linear Connect provisioning", () => {
     ).toEqual({ id: "scl_linear", uid: "linear/agent" });
   });
 
+  it("explains how to replace a connector that lacks Agent Session triggers", async () => {
+    const runVercelCaptureStdout = vi.fn(async () => ({
+      ok: false as const,
+      stdout: "",
+      stderr: 'Error: A connector named "agent-linear" already exists. (409)',
+    }));
+
+    await expect(
+      provisionLinearConnector({
+        log: log(),
+        project: { orgId: "team_123", projectId: "prj_123" },
+        projectRoot: "/project",
+        slug: "agent",
+        deps: { runVercel: vi.fn(), runVercelCaptureStdout },
+      }),
+    ).rejects.toThrow(
+      "vercel connect remove linear/agent --disconnect-all --yes --scope team_123",
+    );
+  });
+
   it("creates the connector and replaces its trigger", async () => {
     const runVercelCaptureStdout = vi.fn(async () => ({
       ok: true as const,

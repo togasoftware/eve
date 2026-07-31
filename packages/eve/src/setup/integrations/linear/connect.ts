@@ -74,6 +74,11 @@ export async function provisionLinearConnector(input: {
     const detail = [result.stderr, result.stdout].find(
       (value): value is string => value !== undefined && value.trim().length > 0,
     );
+    if (detail?.includes("already exists")) {
+      throw new Error(
+        `A Linear connector named \`${input.slug}\` already exists. Remove it with \`vercel connect remove linear/${input.slug} --disconnect-all --yes --scope ${input.project.orgId}\`, then choose Try again to recreate it with AgentSessionEvent triggers.`,
+      );
+    }
     throw new Error(
       detail ? `Linear connector creation failed:\n${detail}` : "Linear connector creation failed.",
     );
