@@ -31,7 +31,7 @@ import {
   type RuntimeAgentHandleAction,
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
-import { REMOTE_AGENT_START_FAILED, SUBAGENT_START_FAILED } from "#harness/agent-handle-errors.js";
+import { SUBAGENT_START_FAILED } from "#harness/agent-handle-errors.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
   deriveAgentId,
@@ -66,6 +66,13 @@ import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
+import {
+  createRecursiveAgentRootOnlyResult,
+  createRemoteAgentStartFailureResult,
+  createUnavailableDynamicSubagentResult,
+  getSubagentName,
+  isRecursiveAgentAction,
+} from "#execution/dispatch-failures.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { createWorkflowRuntime, workflowEntryReference } from "#execution/workflow-runtime.js";
@@ -660,71 +667,4 @@ async function startRemoteSubagent(input: {
       }),
     };
   }
-}
-
-function createUnavailableDynamicSubagentResult(
-  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
-): RuntimeSubagentDispatchFailure {
-  const subagentName = getSubagentName(action);
-  return {
-    callId: action.callId,
-    isError: true,
-    kind: "subagent-result",
-    origin: "dispatch",
-    output: {
-      code: "SUBAGENT_UNAVAILABLE",
-      message: `Subagent "${subagentName}" is not available in the current session context.`,
-    },
-    subagentName,
-  };
-}
-
-function getSubagentName(
-  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
-): string {
-  return action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
-}
-
-function createRemoteAgentStartFailureResult(input: {
-  readonly action: RuntimeRemoteAgentCallActionRequest;
-  readonly error: unknown;
-}): RuntimeSubagentDispatchFailure {
-  return {
-    callId: input.action.callId,
-    isError: true,
-    kind: "subagent-result",
-    origin: "dispatch",
-    output: {
-      code: REMOTE_AGENT_START_FAILED,
-      message: toErrorMessage(input.error),
-    },
-    subagentName: input.action.remoteAgentName,
-  };
-}
-
-function createRecursiveAgentRootOnlyResult(
-  action: RuntimeSubagentCallActionRequest,
-): RuntimeSubagentDispatchFailure {
-  return {
-    callId: action.callId,
-    isError: true,
-    kind: "subagent-result",
-    origin: "dispatch",
-    output: {
-      code: "RECURSIVE_AGENT_ROOT_ONLY",
-      message: 'The built-in "agent" tool is only available to the root session.',
-    },
-    subagentName: action.subagentName,
-  };
-}
-
-function isRecursiveAgentAction(
-  action: RuntimeActionRequest,
-  subagentsByNodeId: ReadonlyMap<string, unknown>,
-): action is RuntimeSubagentCallActionRequest {
-  return (
-    action.kind === "subagent-call" &&
-    action.subagentName === "agent" &&
-    !subagentsByNodeId.has(action.nodeId)
-  );
 }
