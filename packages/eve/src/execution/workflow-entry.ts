@@ -447,9 +447,9 @@ async function runDriverLoop(input: {
         };
       }
 
-      if (next.kind === "compact") {
+      if (next.kind === "clear" || next.kind === "compact") {
         action = await runTurn({
-          delivery: { kind: "compact" },
+          delivery: { kind: next.kind },
           serializedContext: action.serializedContext,
           sessionState: action.sessionState,
         });

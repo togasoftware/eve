@@ -5,6 +5,7 @@ import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
+  | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | {
       readonly delivery: DeliverHookPayload | null;
@@ -14,6 +15,7 @@ type NextSessionAction =
 
 /** What the parked driver should do with the next session activity. */
 export type NextTurnInstruction =
+  | { readonly kind: "clear" }
   | { readonly kind: "compact" }
   | { readonly kind: "expired" }
   | { readonly kind: "closed" }
@@ -47,8 +49,8 @@ export async function nextTurnDelivery(input: {
       return { kind: "expired" };
     }
 
-    if (nextAction.kind === "compact") {
-      return { kind: "compact" };
+    if (nextAction.kind === "clear" || nextAction.kind === "compact") {
+      return { kind: nextAction.kind };
     }
 
     const deliver = nextAction.delivery;
@@ -84,8 +86,9 @@ async function waitForNextSessionAction(input: {
     return { kind: "expired" };
   }
 
-  if (input.deliveryHook.consumeCompactRequest()) {
-    return { kind: "compact" };
+  const pendingSessionControl = input.deliveryHook.consumeSessionControl();
+  if (pendingSessionControl !== undefined) {
+    return { kind: pendingSessionControl };
   }
 
   if (input.bufferedDeliveries.length > 0) {
@@ -107,9 +110,12 @@ async function waitForNextSessionAction(input: {
       return { kind: "expired" };
     }
 
-    if (first.value.kind === "compact") {
-      input.deliveryHook.consumeCompactRequest();
-      return { kind: "compact" };
+    if (first.value.kind === "clear" || first.value.kind === "compact") {
+      const sessionControl = input.deliveryHook.consumeSessionControl();
+      if (sessionControl === undefined) {
+        throw new Error("Session control was consumed without being latched.");
+      }
+      return { kind: sessionControl };
     }
 
     if (first.value.kind !== "deliver") {
@@ -147,7 +153,7 @@ async function waitForNextSessionAction(input: {
 
       input.deliveryHook.consumeNext();
 
-      if (ready.value.kind === "compact") {
+      if (ready.value.kind === "clear" || ready.value.kind === "compact") {
         continue;
       }
 
