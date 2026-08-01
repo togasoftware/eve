@@ -454,7 +454,7 @@ async function runDriverLoop(input: {
           sessionState: action.sessionState,
         });
         input.crashCleanupState.lastSessionState = action.sessionState;
-        continue driverLoop;
+        continue;
       }
 
       if (next.kind === "closed") {
