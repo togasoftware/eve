@@ -184,9 +184,10 @@ export async function dispatchRuntimeActionsStep(input: {
           adapter,
           createSubagentCalledEvent({
             callId: outcome.callId,
-            childSessionId: outcome.childSessionId,
+            childSessionId: outcome.address.sessionId,
             name: outcome.name,
-            remote: outcome.remote,
+            remote:
+              outcome.address.kind === "agent/remote" ? { url: outcome.address.url } : undefined,
             sequence: batch.event.sequence,
             sessionId: session.sessionId,
             toolName: outcome.toolName,
@@ -199,7 +200,7 @@ export async function dispatchRuntimeActionsStep(input: {
       } catch (error) {
         logError(log, "subagent.called emission failed", error, {
           callId: outcome.callId,
-          childSessionId: outcome.childSessionId,
+          childSessionId: outcome.address.sessionId,
           toolName: outcome.toolName,
         });
       }
@@ -443,6 +444,7 @@ async function startLocalSubagent(input: {
         callId: action.callId,
         isError: true,
         kind: "subagent-result",
+        origin: "dispatch",
         output: {
           code: SUBAGENT_START_FAILED,
           message: toErrorMessage(error),
@@ -456,17 +458,18 @@ async function startLocalSubagent(input: {
     };
   }
 
+  const address = {
+    continuationToken: childContinuationToken,
+    kind: targetKind,
+    sessionId: childSessionId,
+  } as const;
   return {
+    address,
     callId: action.callId,
-    childSessionId,
     kind: "called",
     name: action.name,
     session: confirmAgentStarted(preparedSession, {
-      address: {
-        continuationToken: childContinuationToken,
-        kind: targetKind,
-        sessionId: childSessionId,
-      },
+      address,
       operationId: operation.id,
     }),
     toolName: action.subagentName,
@@ -536,22 +539,22 @@ async function startRemoteSubagent(input: {
       remote: resolvedRemote,
       session: input.session,
     });
+    const address = {
+      callbackBaseUrl,
+      kind: "agent/remote",
+      sessionId: child.sessionId,
+      url: resolvedRemote.url,
+      ...(child.continuationToken === undefined
+        ? {}
+        : { continuationToken: child.continuationToken }),
+    } as const;
     return {
+      address,
       callId: action.callId,
-      childSessionId: child.sessionId,
       kind: "called",
       name: action.name,
-      remote: { url: resolvedRemote.url },
       session: confirmAgentStarted(preparedSession, {
-        address: {
-          callbackBaseUrl,
-          kind: "agent/remote",
-          sessionId: child.sessionId,
-          url: resolvedRemote.url,
-          ...(child.continuationToken === undefined
-            ? {}
-            : { continuationToken: child.continuationToken }),
-        },
+        address,
         operationId: operation.id,
       }),
       toolName: action.remoteAgentName,
@@ -603,6 +606,7 @@ function createRemoteAgentStartFailureResult(input: {
     callId: input.action.callId,
     isError: true,
     kind: "subagent-result",
+    origin: "dispatch",
     output: {
       code: REMOTE_AGENT_START_FAILED,
       message: toErrorMessage(input.error),
@@ -618,6 +622,7 @@ function createRecursiveAgentRootOnlyResult(
     callId: action.callId,
     isError: true,
     kind: "subagent-result",
+    origin: "dispatch",
     output: {
       code: "RECURSIVE_AGENT_ROOT_ONLY",
       message: 'The built-in "agent" tool is only available to the root session.',
