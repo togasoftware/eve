@@ -4,22 +4,26 @@ import {
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
 import {
-  readLatestTaskSnapshot,
-  sendTaskCommand,
-  startTaskRun,
-} from "#execution/tasks/run-control.js";
+  createPendingTaskView,
+  createTaskControlError,
+  createTaskViewsResult,
+  createUnknownTasksError,
+  findAddressableHandle,
+  lookupTaskEntries,
+  readTaskViews,
+} from "#execution/tasks/control-shared.js";
+import { executeTaskSend } from "#execution/tasks/send.js";
+import { readLatestTaskSnapshot, sendTaskCommand } from "#execution/tasks/run-control.js";
 import type { AwaitedTaskRef } from "#execution/tasks/await-workflow.js";
 import {
   requestWorkflowTurnCancellation,
   startWorkflowPreferLatest,
   taskAwaitWorkflowReference,
 } from "#execution/workflow-runtime.js";
-import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
-  RuntimeSubagentChildResult,
   RuntimeToolCallActionRequest,
 } from "#runtime/actions/types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -28,134 +32,28 @@ import {
   TASK_CANCEL_TOOL_NAME,
   TASK_CONTROL_TOOL_NAMES,
   TASK_PEEK_TOOL_NAME,
+  TASK_SEND_TOOL_NAME,
 } from "#runtime/framework-tools/tasks.js";
-import type { JsonValue } from "#shared/json.js";
-import { taskViewsToJson } from "#tasks/json.js";
-import {
-  findSessionTaskEntry,
-  recordSessionTask,
-  type SessionTaskIndexEntry,
-} from "#tasks/session-index.js";
-import { deriveTaskCommandToken, deriveTaskId } from "#tasks/task-id.js";
+import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isReadyTaskStatus, type TaskView } from "#tasks/types.js";
+
+export {
+  beginDelegatedTask,
+  failDelegatedDispatch,
+  settleDelegatedDispatch,
+  type DelegatedTask,
+} from "#execution/tasks/delegate.js";
 
 const log = createLogger("execution.tasks.dispatch");
 
 const CANCEL_COMMIT_POLL_ATTEMPTS = 10;
 const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 
-/** A prepared delegated task: identity plus its started durable run. */
-export interface DelegatedTask {
-  readonly commandToken: string;
-  readonly taskId: string;
-  readonly taskRunId: string;
-}
-
-/** True for `task_peek` / `task_await` / `task_cancel` calls. */
+/** True for `task_peek` / `task_await` / `task_cancel` / `task_send` calls. */
 export function isTaskControlAction(
   action: RuntimeActionRequest,
 ): action is RuntimeToolCallActionRequest {
   return action.kind === "tool-call" && TASK_CONTROL_TOOL_NAMES.has(action.toolName);
-}
-
-/**
- * Creates the durable task record for one delegated subagent call,
- * before the child dispatch side effect. The task must exist first so
- * a fast child always finds a live command hook; a duplicate replay
- * re-derives the same token and the loser exits on the hook claim.
- */
-export async function beginDelegatedTask(input: {
-  readonly callId: string;
-  readonly mode: "local" | "remote";
-  readonly name: string;
-  readonly parentSessionId: string;
-  readonly parentTurnId: string;
-  readonly session: RuntimeSession;
-}): Promise<DelegatedTask> {
-  const taskId = deriveTaskId({
-    callId: input.callId,
-    parentSessionId: input.parentSessionId,
-    parentTurnId: input.parentTurnId,
-  });
-  const commandToken = deriveTaskCommandToken({
-    parentContinuationToken: input.session.continuationToken,
-    taskId,
-  });
-  const run = await startTaskRun({
-    commandToken,
-    initialView: {
-      metadata: { kind: "subagent", mode: input.mode, name: input.name },
-      status: "working",
-      taskId,
-    },
-    wakeToken: input.session.continuationToken,
-  });
-  return { commandToken, taskId, taskRunId: run.runId };
-}
-
-/**
- * Settles a delegated dispatch that acknowledged a child: attaches the
- * child session to the task, records the task in the session index, and
- * returns the receipt that resolves the originating tool call.
- *
- * The receipt carries a `parked` outcome so the existing resolve path
- * settles the agent handle to `parked` — the handle keeps the child
- * address for follow-ups while the task run owns the outstanding work.
- */
-export async function settleDelegatedDispatch(input: {
-  readonly callId: string;
-  readonly childSessionId: string;
-  readonly session: RuntimeSession;
-  readonly subagentName: string;
-  readonly task: DelegatedTask;
-}): Promise<{ readonly receipt: RuntimeSubagentChildResult; readonly session: RuntimeSession }> {
-  // The freshly started task run may not have registered its hook yet;
-  // ride out that startup window instead of dropping the acknowledgement.
-  await sendTaskCommand({
-    command: { childSessionId: input.childSessionId, kind: "describe" },
-    commandToken: input.task.commandToken,
-    retryUnreachable: { attempts: 20, delayMs: 250 },
-  });
-  const receiptOutput = { status: "working", taskId: input.task.taskId };
-  return {
-    receipt: {
-      callId: input.callId,
-      kind: "subagent-result",
-      outcome: {
-        kind: "parked",
-        result: {
-          kind: "succeeded",
-          output: `Delegated as background task ${input.task.taskId} (working).`,
-        },
-        usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
-      },
-      output: receiptOutput,
-      sessionId: input.childSessionId,
-      subagentName: input.subagentName,
-    },
-    session: recordSessionTask(input.session, {
-      commandToken: input.task.commandToken,
-      taskId: input.task.taskId,
-      taskRunId: input.task.taskRunId,
-    }),
-  };
-}
-
-/**
- * Terminates the task record for a dispatch that never acknowledged a
- * child. The originating call gets the dispatch failure directly; the
- * task fails out of band and is never recorded in the session index,
- * so the model never sees a task id for work that never started.
- */
-export async function failDelegatedDispatch(input: {
-  readonly error: JsonValue;
-  readonly task: DelegatedTask;
-}): Promise<void> {
-  await sendTaskCommand({
-    command: { data: input.error, kind: "fail" },
-    commandToken: input.task.commandToken,
-    retryUnreachable: { attempts: 20, delayMs: 250 },
-  });
 }
 
 /**
@@ -164,57 +62,55 @@ export async function failDelegatedDispatch(input: {
  * tools need. `task_await` is the exception: when any selected task is
  * still working it starts the aggregation run and returns no result,
  * leaving the pending key to the turn's existing inbox wait.
+ *
+ * Returns the (possibly updated) session: `task_send` follow-ups record
+ * new tasks and settle the continued agent handle.
  */
 export async function executeTaskControlAction(input: {
   readonly action: RuntimeToolCallActionRequest;
   readonly bundle: CompiledBundle;
   readonly parentContinuationToken: string | undefined;
+  readonly parentTurnId: string;
   readonly session: RuntimeSession;
-}): Promise<{ readonly result: RuntimeActionResult | undefined }> {
-  const { action } = input;
+}): Promise<{
+  readonly result: RuntimeActionResult | undefined;
+  readonly session: RuntimeSession;
+}> {
+  const { action, session } = input;
+
+  if (action.toolName === TASK_SEND_TOOL_NAME) {
+    return executeTaskSend(input);
+  }
+
   const taskIds = readTaskIds(action.input);
   if (taskIds === undefined || taskIds.length === 0) {
     return {
       result: createTaskControlError(action, "Provide a non-empty `taskIds` array."),
+      session,
     };
   }
 
-  const entries: SessionTaskIndexEntry[] = [];
-  const unknown: string[] = [];
-  for (const taskId of taskIds) {
-    const entry = findSessionTaskEntry(input.session.state, taskId);
-    if (entry === undefined) {
-      unknown.push(taskId);
-    } else {
-      entries.push(entry);
-    }
+  const lookup = lookupTaskEntries(session, taskIds);
+  if (lookup.kind === "unknown") {
+    return { result: createUnknownTasksError(action, lookup.unknown), session };
   }
-  if (unknown.length > 0) {
-    return {
-      result: createTaskControlError(
-        action,
-        `Unknown task ids: ${unknown.join(", ")}. Tasks belong to the session that created them.`,
-      ),
-    };
-  }
+  const entries = lookup.entries;
 
   switch (action.toolName) {
     case TASK_PEEK_TOOL_NAME: {
       const views = await readTaskViews(entries);
-      return { result: createTaskViewsResult(action, views) };
+      return { result: createTaskViewsResult(action, views), session };
     }
     case TASK_CANCEL_TOOL_NAME: {
       const views = await Promise.all(
-        entries.map((entry) =>
-          cancelOneTask({ bundle: input.bundle, entry, session: input.session }),
-        ),
+        entries.map((entry) => cancelOneTask({ bundle: input.bundle, entry, session })),
       );
-      return { result: createTaskViewsResult(action, views) };
+      return { result: createTaskViewsResult(action, views), session };
     }
     case TASK_AWAIT_TOOL_NAME: {
       const views = await readTaskViews(entries);
       if (views.every((view) => isReadyTaskStatus(view.status))) {
-        return { result: createTaskViewsResult(action, views) };
+        return { result: createTaskViewsResult(action, views), session };
       }
       if (input.parentContinuationToken === undefined) {
         return {
@@ -222,6 +118,7 @@ export async function executeTaskControlAction(input: {
             action,
             "task_await is unavailable on this session driver.",
           ),
+          session,
         };
       }
       const tasks: AwaitedTaskRef[] = entries.map((entry) => ({
@@ -236,11 +133,12 @@ export async function executeTaskControlAction(input: {
           toolName: action.toolName,
         },
       ]);
-      return { result: undefined };
+      return { result: undefined, session };
     }
     default:
       return {
         result: createTaskControlError(action, `Unsupported task control "${action.toolName}".`),
+        session,
       };
   }
 }
@@ -285,13 +183,7 @@ async function propagateTaskCancel(input: {
 }): Promise<void> {
   const childSessionId = input.view.metadata.childSessionId;
   if (childSessionId === undefined) return;
-  const handles = getAgentHandleStore(input.session.state)?.handles ?? [];
-  const handle = handles
-    .filter(
-      (candidate): candidate is Extract<AgentHandle, { phase: "running" | "parked" }> =>
-        candidate.phase === "running" || candidate.phase === "parked",
-    )
-    .find((candidate) => candidate.address.sessionId === childSessionId);
+  const handle = findAddressableHandle(input.session, childSessionId);
 
   try {
     if (handle !== undefined && handle.address.kind === "agent/remote") {
@@ -313,49 +205,6 @@ async function propagateTaskCancel(input: {
       taskId: input.view.taskId,
     });
   }
-}
-
-async function readTaskViews(entries: readonly SessionTaskIndexEntry[]): Promise<TaskView[]> {
-  return Promise.all(
-    entries.map(
-      async (entry) =>
-        (await readLatestTaskSnapshot({ taskRunId: entry.taskRunId })) ??
-        createPendingTaskView(entry.taskId),
-    ),
-  );
-}
-
-function createPendingTaskView(taskId: string): TaskView {
-  return {
-    metadata: { kind: "subagent", mode: "local", name: "unknown" },
-    status: "working",
-    taskId,
-  };
-}
-
-function createTaskViewsResult(
-  action: RuntimeToolCallActionRequest,
-  views: readonly TaskView[],
-): RuntimeActionResult {
-  return {
-    callId: action.callId,
-    kind: "tool-result",
-    output: taskViewsToJson(views),
-    toolName: action.toolName,
-  };
-}
-
-function createTaskControlError(
-  action: RuntimeToolCallActionRequest,
-  message: string,
-): RuntimeActionResult {
-  return {
-    callId: action.callId,
-    isError: true,
-    kind: "tool-result",
-    output: { message },
-    toolName: action.toolName,
-  };
 }
 
 function readTaskIds(input: Record<string, unknown>): readonly string[] | undefined {

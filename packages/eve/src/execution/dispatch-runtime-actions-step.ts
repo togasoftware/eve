@@ -154,8 +154,10 @@ export async function dispatchRuntimeActionsStep(input: {
           action: entry.action,
           bundle,
           parentContinuationToken: input.parentContinuationToken,
+          parentTurnId: batch.event.turnId,
           session: nextSession,
         });
+        nextSession = control.session;
         if (control.result !== undefined) {
           results.push(control.result);
         }

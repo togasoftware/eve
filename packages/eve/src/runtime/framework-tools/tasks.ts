@@ -18,6 +18,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 export const TASK_PEEK_TOOL_NAME = "task_peek";
 export const TASK_AWAIT_TOOL_NAME = "task_await";
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
+export const TASK_SEND_TOOL_NAME = "task_send";
 export const TASK_SLEEP_TOOL_NAME = "task_sleep";
 
 /** Every model-visible task tool name, for gating and dispatch matching. */
@@ -25,6 +26,7 @@ export const TASK_TOOL_NAMES: ReadonlySet<string> = new Set([
   TASK_PEEK_TOOL_NAME,
   TASK_AWAIT_TOOL_NAME,
   TASK_CANCEL_TOOL_NAME,
+  TASK_SEND_TOOL_NAME,
   TASK_SLEEP_TOOL_NAME,
 ]);
 
@@ -33,6 +35,7 @@ export const TASK_CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
   TASK_PEEK_TOOL_NAME,
   TASK_AWAIT_TOOL_NAME,
   TASK_CANCEL_TOOL_NAME,
+  TASK_SEND_TOOL_NAME,
 ]);
 
 const TASK_IDS_SCHEMA = z
@@ -43,6 +46,28 @@ const TASK_IDS_SCHEMA = z
 export const TASK_PEEK_INPUT_SCHEMA = z.strictObject({ taskIds: TASK_IDS_SCHEMA });
 export const TASK_AWAIT_INPUT_SCHEMA = z.strictObject({ taskIds: TASK_IDS_SCHEMA });
 export const TASK_CANCEL_INPUT_SCHEMA = z.strictObject({ taskIds: TASK_IDS_SCHEMA });
+
+export const TASK_SEND_INPUT_SCHEMA = z.strictObject({
+  inputResponses: z
+    .array(
+      z.strictObject({
+        optionId: z.string().optional(),
+        requestId: z.string(),
+        text: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe(
+      "Answers to the outstanding requests of an input_required task. Provide exactly one of inputResponses or message.",
+    ),
+  message: z
+    .string()
+    .optional()
+    .describe(
+      "Follow-up message for a finished task's agent; starts a new task in the same conversation.",
+    ),
+  taskId: z.string().min(1).describe("Task id from an earlier task receipt."),
+});
 
 const MAX_SLEEP_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
 
@@ -90,6 +115,10 @@ const TASK_CANCEL_DESCRIPTION =
   "Request cooperative cancellation of one or more background tasks. " +
   "Cancellation is final: a task that finishes after you cancel it stays cancelled. Cancelling an already-finished task changes nothing.";
 
+const TASK_SEND_DESCRIPTION =
+  "Answer an input_required background task with inputResponses, or send a follow-up message to a finished task's agent. " +
+  "A follow-up starts a new task in the same conversation and returns its receipt. A task that is still working cannot receive sends.";
+
 const TASK_SLEEP_DESCRIPTION =
   "Pause durably before continuing, for paced background-task checks. " +
   "Does not read or change any task; follow it with task_peek or task_await.";
@@ -121,6 +150,12 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
       inputSchema: TASK_CANCEL_INPUT_SCHEMA,
       name: TASK_CANCEL_TOOL_NAME,
       outputSchema: TASK_VIEWS_OUTPUT_SCHEMA,
+      runtimeAction: { kind: "task-control" },
+    },
+    {
+      description: TASK_SEND_DESCRIPTION,
+      inputSchema: TASK_SEND_INPUT_SCHEMA,
+      name: TASK_SEND_TOOL_NAME,
       runtimeAction: { kind: "task-control" },
     },
     {
@@ -182,5 +217,6 @@ export const TASK_TOOL_DEFINITIONS: readonly ResolvedToolDefinition[] = [
   createResolvedTaskToolStub({ description: TASK_PEEK_DESCRIPTION, name: TASK_PEEK_TOOL_NAME }),
   createResolvedTaskToolStub({ description: TASK_AWAIT_DESCRIPTION, name: TASK_AWAIT_TOOL_NAME }),
   createResolvedTaskToolStub({ description: TASK_CANCEL_DESCRIPTION, name: TASK_CANCEL_TOOL_NAME }),
+  createResolvedTaskToolStub({ description: TASK_SEND_DESCRIPTION, name: TASK_SEND_TOOL_NAME }),
   createResolvedTaskToolStub({ description: TASK_SLEEP_DESCRIPTION, name: TASK_SLEEP_TOOL_NAME }),
 ];

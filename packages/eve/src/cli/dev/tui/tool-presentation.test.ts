@@ -181,6 +181,7 @@ describe("presentTool", () => {
       task_await: { taskIds: ["task_abc"] },
       task_cancel: { taskIds: ["task_abc"] },
       task_peek: { taskIds: ["task_abc"] },
+      task_send: { message: "Continue with the next region.", taskId: "task_abc" },
       task_sleep: { seconds: 30 },
       todo: { todos: [] },
       web_fetch: { url: "https://example.com" },
