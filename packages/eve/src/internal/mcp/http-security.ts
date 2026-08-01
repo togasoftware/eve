@@ -1,8 +1,3 @@
-import {
-  hostHeaderValidationResponse,
-  originValidationResponse,
-} from "#compiled/@modelcontextprotocol/server/index.js";
-
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 /**
@@ -16,9 +11,6 @@ export function validateMcpHttpRequest(request: Request): Response | undefined {
   if (baseFailure !== undefined) return baseFailure;
 
   const target = new URL(request.url);
-  const originFailure = originValidationResponse(request, [target.hostname]);
-  if (originFailure !== undefined) return originFailure;
-
   const originHeader = request.headers.get("origin");
   if (originHeader === null || originHeader.length === 0) return undefined;
 
@@ -58,8 +50,26 @@ function validateMcpHttpRequestBase(request: Request): Response | undefined {
     return securityError("MCP endpoints require HTTPS except on loopback.");
   }
 
-  const hostFailure = hostHeaderValidationResponse(request, [target.hostname]);
+  const hostFailure = validateHostHeader(request, target.hostname);
   if (hostFailure !== undefined) return hostFailure;
+  return undefined;
+}
+
+function validateHostHeader(request: Request, expectedHostname: string): Response | undefined {
+  const hostHeader = request.headers.get("host");
+  if (hostHeader === null || hostHeader.length === 0) {
+    return securityError("Missing Host header");
+  }
+
+  let hostname: string;
+  try {
+    hostname = new URL(`http://${hostHeader}`).hostname;
+  } catch {
+    return securityError("Invalid Host header");
+  }
+  if (hostname !== expectedHostname) {
+    return securityError(`Invalid Host header: ${hostHeader}`);
+  }
   return undefined;
 }
 

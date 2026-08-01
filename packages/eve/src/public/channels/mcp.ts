@@ -377,15 +377,10 @@ function createInvocationTools(
           agentDescription === undefined
             ? startDescription
             : `${agentDescription} ${startDescription}`,
-        inputSchema: {
-          additionalProperties: false,
-          properties: {
-            message: { type: "string" },
-            outputSchema: { type: "object" },
-          },
-          required: ["message"],
-          type: "object",
-        },
+        inputSchema: z.strictObject({
+          message: z.string().min(1),
+          outputSchema: z.looseObject({}).optional(),
+        }),
         name: "agent_start",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -410,14 +405,7 @@ function createInvocationTools(
           readOnlyHint: true,
         },
         description: `Reads complete durable invocation state.${publicHandleDescription}`,
-        inputSchema: {
-          additionalProperties: false,
-          properties: {
-            invocationId: { type: "string" },
-          },
-          required: ["invocationId"],
-          type: "object",
-        },
+        inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
         name: "agent_get",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -440,15 +428,10 @@ function createInvocationTools(
           readOnlyHint: false,
         },
         description: "Answers a pending input request on a durable invocation.",
-        inputSchema: {
-          additionalProperties: false,
-          properties: {
-            invocationId: { type: "string" },
-            responses: { items: INPUT_RESPONSE_JSON_SCHEMA, type: "array" },
-          },
-          required: ["invocationId", "responses"],
-          type: "object",
-        },
+        inputSchema: z.strictObject({
+          invocationId: z.string().min(1),
+          responses: z.array(inputResponseSchema),
+        }),
         name: "agent_update",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -475,12 +458,7 @@ function createInvocationTools(
         },
         description:
           "Requests cancellation of a durable invocation. Read it again to observe acknowledgement.",
-        inputSchema: {
-          additionalProperties: false,
-          properties: { invocationId: { type: "string" } },
-          required: ["invocationId"],
-          type: "object",
-        },
+        inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
         name: "agent_cancel",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -523,80 +501,54 @@ function asJsonObject(value: unknown): JsonObject | undefined {
   return schema;
 }
 
-const INPUT_REQUEST_JSON_SCHEMA = embeddedJsonSchema(inputRequestSchema);
-const INPUT_RESPONSE_JSON_SCHEMA = embeddedJsonSchema(inputResponseSchema);
+const AUTHORIZATION_CHALLENGE_SCHEMA = z.strictObject({
+  displayName: z.string().optional(),
+  expiresAt: z.iso.datetime().optional(),
+  instructions: z.string().optional(),
+  url: z.url().optional(),
+  userCode: z.string().optional(),
+});
 
-function embeddedJsonSchema(schema: z.ZodType): Readonly<Record<string, unknown>> {
-  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(schema, { io: "input" });
-  return jsonSchema;
-}
+const AUTHORIZATION_REQUEST_SCHEMA = z.strictObject({
+  authorization: AUTHORIZATION_CHALLENGE_SCHEMA.optional(),
+  description: z.string(),
+  name: z.string(),
+  webhookUrl: z.url().optional(),
+});
 
-const AUTHORIZATION_CHALLENGE_SCHEMA = {
-  additionalProperties: false,
-  properties: {
-    displayName: { type: "string" },
-    expiresAt: { format: "date-time", type: "string" },
-    instructions: { type: "string" },
-    url: { format: "uri", type: "string" },
-    userCode: { type: "string" },
-  },
-  type: "object",
-} as const;
+const MCP_INPUT_REQUEST_SCHEMA = inputRequestSchema.safeExtend({
+  action: z.strictObject({
+    callId: z.string(),
+    input: z.record(z.string(), z.json()),
+    kind: z.literal("tool-call"),
+    toolName: z.string(),
+  }),
+});
 
-const AUTHORIZATION_REQUEST_SCHEMA = {
-  additionalProperties: false,
-  properties: {
-    authorization: AUTHORIZATION_CHALLENGE_SCHEMA,
-    description: { type: "string" },
-    name: { type: "string" },
-    webhookUrl: { format: "uri", type: "string" },
-  },
-  required: ["description", "name"],
-  type: "object",
-} as const;
-
-const AGENT_INVOCATION_OUTPUT_SCHEMA = {
-  additionalProperties: false,
-  properties: {
-    authorizations: {
-      items: AUTHORIZATION_REQUEST_SCHEMA,
-      minItems: 1,
-      type: "array",
-    },
-    createdAt: { format: "date-time", type: "string" },
-    error: {
-      additionalProperties: false,
-      properties: {
-        code: { type: "integer" },
-        data: {},
-        message: { type: "string" },
-      },
-      required: ["code", "message"],
-      type: "object",
-    },
-    expiresAt: { format: "date-time", type: "string" },
-    inputRequests: {
-      additionalProperties: INPUT_REQUEST_JSON_SCHEMA,
-      type: "object",
-    },
-    invocationId: { type: "string" },
-    pollAfterMs: { minimum: 0, type: "integer" },
-    result: {},
-    status: {
-      enum: [
-        "working",
-        "input_required",
-        "authorization_required",
-        "completed",
-        "failed",
-        "cancelled",
-      ],
-      type: "string",
-    },
-  },
-  required: ["createdAt", "invocationId", "status"],
-  type: "object",
-} as const;
+const AGENT_INVOCATION_OUTPUT_SCHEMA = z.strictObject({
+  authorizations: z.array(AUTHORIZATION_REQUEST_SCHEMA).min(1).optional(),
+  createdAt: z.iso.datetime(),
+  error: z
+    .strictObject({
+      code: z.number().int(),
+      data: z.json().optional(),
+      message: z.string(),
+    })
+    .optional(),
+  expiresAt: z.iso.datetime().optional(),
+  inputRequests: z.record(z.string(), MCP_INPUT_REQUEST_SCHEMA).optional(),
+  invocationId: z.string(),
+  pollAfterMs: z.number().int().nonnegative().optional(),
+  result: z.json().optional(),
+  status: z.enum([
+    "working",
+    "input_required",
+    "authorization_required",
+    "completed",
+    "failed",
+    "cancelled",
+  ]),
+});
 
 const MAX_OUTPUT_SCHEMA_BYTES = 64 * 1_024;
 const MAX_OUTPUT_SCHEMA_DEPTH = 32;

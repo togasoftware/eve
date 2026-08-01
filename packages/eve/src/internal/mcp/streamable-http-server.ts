@@ -1,21 +1,22 @@
-import {
-  createMcpHandler,
-  fromJsonSchema,
-  McpServer,
-  type McpToolAnnotations,
-} from "#compiled/@modelcontextprotocol/server/index.js";
+import { defineMcpHandler, type McpToolAnnotations } from "#compiled/h3-mcp/index.js";
+import type { z } from "#compiled/zod/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 export const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
+const MCP_LEGACY_PROTOCOL_VERSIONS = new Set([
+  MCP_LEGACY_PROTOCOL_VERSION,
+  "2025-06-18",
+  "2025-03-26",
+]);
 
 export interface McpToolDefinition {
   readonly name: string;
   readonly description?: string;
   readonly annotations?: McpToolAnnotations;
-  readonly inputSchema: Readonly<Record<string, unknown>>;
-  readonly outputSchema?: Readonly<Record<string, unknown>>;
+  readonly inputSchema: z.ZodType;
+  readonly outputSchema?: z.ZodType;
 }
 
 export interface McpCallToolResult {
@@ -43,12 +44,7 @@ export interface McpStreamableHttpServerOptions {
   authenticate(request: Request): Promise<SessionAuthContext | null | Response>;
 }
 
-/**
- * Creates a dual-era, stateless MCP HTTP request handler.
- *
- * Current clients use MCP 2026-07-28's per-request envelope. Older clients
- * fall back to the SDK's stateless 2025 Streamable HTTP implementation.
- */
+/** Creates a dual-era, stateless MCP HTTP request handler. */
 export function createMcpStreamableHttpServer(
   options: McpStreamableHttpServerOptions,
 ): (request: Request) => Promise<Response> {
@@ -59,131 +55,91 @@ export function createMcpStreamableHttpServer(
     const auth = await options.authenticate(request);
     if (auth instanceof Response) return auth;
 
-    const preflight = await preflightModernRequest(request);
+    const preflight = await preflightRequest(request);
     if (preflight.response !== undefined) return preflight.response;
 
-    const handler = createMcpHandler(() => createServer(options, tools, auth), {
-      legacy: "stateless",
+    const handler = defineMcpHandler({
+      era: preflight.modern ? "modern" : "dual",
+      name: options.name,
+      origin: false,
+      tools: [...tools.values()].map((tool) => ({
+        ...tool.definition,
+        handler: async (input, event) => await callTool(tool, input, event.req.signal, auth),
+      })),
+      version: options.version,
     });
-    return await handler.fetch(
-      request,
-      preflight.parsedBody === undefined ? undefined : { parsedBody: preflight.parsedBody },
-    );
+    return await handler.fetch(request);
   };
 }
 
-interface ModernRequestPreflight {
-  readonly parsedBody?: unknown;
+interface McpRequestPreflight {
+  readonly modern: boolean;
   readonly response?: Response;
 }
 
-/**
- * The SDK currently checks MCP-Protocol-Version only when the header is
- * present. MCP 2026-07-28 requires it on every modern POST, so reject the
- * missing-header case here until the upstream handler does:
- * modelcontextprotocol/typescript-sdk#2589.
- */
-async function preflightModernRequest(request: Request): Promise<ModernRequestPreflight> {
-  if (request.method.toUpperCase() !== "POST" || request.headers.has("mcp-protocol-version")) {
-    return {};
+async function preflightRequest(request: Request): Promise<McpRequestPreflight> {
+  const protocolHeader = request.headers.get("mcp-protocol-version");
+  const modernHeader = protocolHeader !== null && !MCP_LEGACY_PROTOCOL_VERSIONS.has(protocolHeader);
+  if (request.method.toUpperCase() !== "POST") return { modern: modernHeader };
+
+  const accept = request.headers.get("accept") ?? "";
+  if (!accept.includes("application/json") || !accept.includes("text/event-stream")) {
+    return { modern: modernHeader, response: jsonRpcError(null, -32_000, "Not Acceptable", 406) };
   }
 
-  let parsedBody: unknown;
-  try {
-    parsedBody = await request.clone().json();
-  } catch {
-    return {};
+  const method = request.headers.get("mcp-method");
+  if (
+    modernHeader &&
+    method !== null &&
+    ["completion/", "prompts/", "resources/"].some((prefix) => method.startsWith(prefix))
+  ) {
+    const body = await readRequestBody(request);
+    if (readJsonRpcRequestMethod(body) === method) {
+      return {
+        modern: true,
+        response: jsonRpcError(readJsonRpcRequestId(body), -32_601, "Method not found", 404),
+      };
+    }
   }
 
-  if (!claimsCurrentProtocolVersion(parsedBody)) {
-    return { parsedBody };
-  }
+  if (protocolHeader !== null) return { modern: modernHeader };
 
-  const earlierFailure = await probeEarlierValidationFailure(request, parsedBody);
-  if (earlierFailure !== undefined) {
-    return { parsedBody, response: earlierFailure };
-  }
+  const body = await readRequestBody(request);
+  const version = readBodyProtocolVersion(body);
+  if (version === undefined) return { modern: false };
+  if (version === MCP_PROTOCOL_VERSION) return { modern: true };
 
   return {
-    parsedBody,
-    response: headerMismatchResponse(parsedBody),
+    modern: true,
+    response: jsonRpcError(
+      readJsonRpcRequestId(body),
+      -32_022,
+      "Unsupported protocol version",
+      400,
+      {
+        requested: version,
+        supported: [MCP_PROTOCOL_VERSION],
+      },
+    ),
   };
 }
 
-function claimsCurrentProtocolVersion(body: unknown): boolean {
-  return (
-    isPlainRecord(body) &&
-    isPlainRecord(body.params) &&
-    isPlainRecord(body.params._meta) &&
-    body.params._meta["io.modelcontextprotocol/protocolVersion"] === MCP_PROTOCOL_VERSION
-  );
-}
-
-function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Ask a side-effect-free SDK handler to apply the validation rungs that
- * precede required standard-header presence. Preserve those errors; otherwise
- * the valid current-revision envelope is ready for the missing-header error.
- */
-async function probeEarlierValidationFailure(
-  request: Request,
-  parsedBody: unknown,
-): Promise<Response | undefined> {
-  const headers = new Headers(request.headers);
-  headers.set("mcp-protocol-version", MCP_PROTOCOL_VERSION);
-  const probeRequest = new Request(request.clone(), { headers });
-  const probe = createMcpHandler(() => new McpServer({ name: "eve-mcp-preflight", version: "0" }), {
-    legacy: "reject",
-  });
+async function readRequestBody(request: Request): Promise<unknown> {
   try {
-    const response = await probe.fetch(probeRequest, { parsedBody });
-    if (response.status === 406 || response.status === 415) {
-      return response;
-    }
-    if (response.status === 400) {
-      const body = (await response
-        .clone()
-        .json()
-        .catch(() => undefined)) as { readonly error?: { readonly code?: unknown } } | undefined;
-      if (
-        body?.error?.code === -32_700 ||
-        body?.error?.code === -32_600 ||
-        body?.error?.code === -32_602 ||
-        body?.error?.code === -32_022
-      ) {
-        return response;
-      }
-    }
-    await response.body?.cancel();
+    return await request.clone().json();
+  } catch {
     return undefined;
-  } finally {
-    await probe.close().catch(() => {});
   }
 }
 
-function headerMismatchResponse(body: unknown): Response {
-  const mismatchBody =
-    "the body carries a modern MCP envelope but the required MCP-Protocol-Version header is absent";
-  return Response.json(
-    {
-      error: {
-        code: -32_020,
-        data: {
-          mismatch: {
-            body: mismatchBody,
-            header: "(missing)",
-          },
-        },
-        message: `Bad Request: the request headers and body disagree: ${mismatchBody}`,
-      },
-      id: readJsonRpcRequestId(body),
-      jsonrpc: "2.0",
-    },
-    { status: 400 },
-  );
+function readBodyProtocolVersion(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
+  const params = Reflect.get(body, "params");
+  if (typeof params !== "object" || params === null || Array.isArray(params)) return undefined;
+  const meta = Reflect.get(params, "_meta");
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
+  const version = Reflect.get(meta, "io.modelcontextprotocol/protocolVersion");
+  return typeof version === "string" ? version : undefined;
 }
 
 function readJsonRpcRequestId(body: unknown): string | number | null {
@@ -192,36 +148,33 @@ function readJsonRpcRequestId(body: unknown): string | number | null {
   return typeof id === "string" || typeof id === "number" ? id : null;
 }
 
-function createServer(
-  options: Pick<McpStreamableHttpServerOptions, "name" | "version">,
-  tools: ReadonlyMap<string, McpServerTool>,
-  auth: SessionAuthContext | null,
-): McpServer {
-  const server = new McpServer(
-    { name: options.name, version: options.version },
-    { capabilities: { tools: { listChanged: false } } },
+function readJsonRpcRequestMethod(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
+  const method = Reflect.get(body, "method");
+  return typeof method === "string" ? method : undefined;
+}
+
+function jsonRpcError(
+  id: string | number | null,
+  code: number,
+  message: string,
+  status: number,
+  data?: Readonly<Record<string, unknown>>,
+): Response {
+  const error: {
+    readonly code: number;
+    readonly message: string;
+    data?: Readonly<Record<string, unknown>>;
+  } = { code, message };
+  if (data !== undefined) error.data = data;
+  return Response.json(
+    {
+      error,
+      id,
+      jsonrpc: "2.0",
+    },
+    { status },
   );
-
-  for (const tool of tools.values()) {
-    server.registerTool(
-      tool.definition.name,
-      {
-        ...(tool.definition.annotations === undefined
-          ? {}
-          : { annotations: tool.definition.annotations }),
-        ...(tool.definition.description === undefined
-          ? {}
-          : { description: tool.definition.description }),
-        inputSchema: fromJsonSchema(tool.definition.inputSchema),
-        ...(tool.definition.outputSchema === undefined
-          ? {}
-          : { outputSchema: fromJsonSchema(tool.definition.outputSchema) }),
-      },
-      async (input, context) => await callTool(tool, input, context.mcpReq.signal, auth),
-    );
-  }
-
-  return server;
 }
 
 async function callTool(
