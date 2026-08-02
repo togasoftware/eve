@@ -73,6 +73,8 @@ export interface CreateExecutionNodeStepInput {
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
+  /** Whether prompt assembly must wait for step-scoped instruction resolution. */
+  readonly stepDynamicInstructions?: boolean;
   /**
    * Effective `maxSubagents` cap configured by the experimental Workflow tool
    * definition and materialized on the session at creation.
@@ -112,6 +114,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
+    stepDynamicInstructions: input.stepDynamicInstructions,
     tools,
   });
   if (instrumentation === undefined) return step;

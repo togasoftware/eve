@@ -212,7 +212,7 @@ Skills follow the same naming rule as tools: a single `defineSkill(...)` is name
 
 ## Dynamic instructions
 
-A dynamic instructions file resolves the per-session system prompt the same way, returning `defineInstructions(...)` built from the principal, tenant, or external data:
+A dynamic instructions file resolves system prompt fragments at session, turn, or step scope, returning `defineInstructions(...)` built from the principal, tenant, external data, or durable agent state:
 
 ```ts title="agent/instructions/persona.ts"
 import { defineDynamic, defineInstructions } from "eve/instructions";
@@ -229,7 +229,33 @@ export default defineDynamic({
 });
 ```
 
-Both resolve before the prompt is assembled, so the model sees the right instructions and skill set for whoever is calling, without that context reaching anyone else.
+Use `turn.started` when instructions can change between user messages. Use `step.started` when a tool can change the state that determines the instructions and the model's continuation must see the replacement immediately:
+
+```ts title="agent/instructions/flow.ts"
+import { defineDynamic, defineInstructions } from "eve/instructions";
+import { activeFlow, buildFlowInstructions } from "../lib/flow";
+
+export default defineDynamic({
+  events: {
+    "step.started": () =>
+      defineInstructions({
+        markdown: buildFlowInstructions(activeFlow.get()),
+      }),
+  },
+});
+```
+
+| Event             | Resolver runs          | Instructions apply to           |
+| ----------------- | ---------------------- | ------------------------------- |
+| `session.started` | Once per session       | Every model call in the session |
+| `turn.started`    | Once per turn          | Every model call in the turn    |
+| `step.started`    | Before each model call | That model call                 |
+
+For one instructions file, a step result replaces its session and turn instructions for that model call. Session and turn handlers keep their existing additive composition when no step handler is present. A `null` step result omits that file's wider-scope instructions for the call; a thrown resolver retains the wider-scope value. Step values are not serialized and resolve again before the next model call.
+
+Step-scoped instructions change the system prompt within a turn and can reduce prompt-cache hits. Prefer session or turn scope unless the model continuation must observe a mid-turn state transition.
+
+Instructions and skills resolve before the prompt is assembled, so the model sees the right context for whoever is calling without that context reaching anyone else.
 
 ## What to read next
 
