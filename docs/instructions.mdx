@@ -51,7 +51,7 @@ Instructions never run code. When you need typed executable behavior, reach for 
 
 ## Dynamic instructions
 
-To resolve the prompt at runtime from session context (auth, tenant, or channel), wrap `defineInstructions` in a `defineDynamic` resolver. See [Dynamic capabilities](./guides/dynamic-capabilities).
+To resolve the prompt at runtime from session context (auth, tenant, or channel), turn context, or step-local state, wrap `defineInstructions` in a `defineDynamic` resolver. Step-scoped instructions resolve before each model call and replace the same file's wider-scope value for that call. See [Dynamic capabilities](./guides/dynamic-capabilities).
 
 ## Disclaimer
 
