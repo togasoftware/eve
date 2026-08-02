@@ -228,3 +228,11 @@ export const SessionDynamicInstructionsKey = new ContextKey<
 export const TurnDynamicInstructionsKey = new ContextKey<
   Record<string, readonly SystemModelMessage[]>
 >("eve.turnDynamicInstructions");
+
+/**
+ * Virtual step-scoped instruction messages (from `step.started` resolvers).
+ * Keyed by resolver slug. `null` shadows that resolver's wider-scope value.
+ */
+export const LiveStepDynamicInstructionsKey = new ContextKey<
+  Record<string, readonly SystemModelMessage[] | null>
+>("eve.liveStepDynamicInstructions");
