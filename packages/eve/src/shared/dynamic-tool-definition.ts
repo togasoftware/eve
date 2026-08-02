@@ -26,14 +26,8 @@ export const ALLOWED_DYNAMIC_TOOL_EVENTS: ReadonlySet<string> = new Set<DynamicT
   "step.started",
 ]);
 
-/**
- * Instructions and skills are restricted to session/turn boundaries.
- * They feed the system prompt, the most cache-sensitive position in the
- * wire format; keeping them stable across steps within a turn maximizes
- * cache hits.
- */
 export const ALLOWED_DYNAMIC_INSTRUCTION_EVENTS: ReadonlySet<string> =
-  new Set<DynamicToolEventName>(["session.started", "turn.started"]);
+  new Set<DynamicToolEventName>(["session.started", "turn.started", "step.started"]);
 
 export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>([
   "session.started",
