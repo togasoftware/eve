@@ -442,6 +442,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             nodeId: bundle.nodeId,
           },
           node: effectiveNode,
+          stepDynamicInstructions: dynamicInstructionsResolvers.some((resolver) =>
+            resolver.eventNames.includes("step.started"),
+          ),
           workflowMaxSubagents: refreshedSession.workflowMaxSubagents,
         });
         return step(refreshedSession, stepInput);
