@@ -277,10 +277,18 @@ describe("dispatchDynamicInstructionEvent", () => {
     ]);
   });
 
-  it("rejects step.started events for instructions", async () => {
+  it("refreshes instructions after a tool commits a flow transition", async () => {
     const ctx = createCtx();
-    const handler = vi.fn(() => defineInstructions({ markdown: "nope" }));
-    const resolver = createResolver("context", ["step.started"], handler);
+    ctx.set(TurnDynamicInstructionsKey, {
+      flow: [{ role: "system", content: "Source procedure." }],
+      safety: [{ role: "system", content: "Safety instructions." }],
+    });
+    let activeFlow = "source";
+    const handler = vi.fn(() => defineInstructions({ markdown: `${activeFlow} procedure.` }));
+    const resolver = createResolver("flow", ["step.started"], handler);
+
+    // Simulate the preceding tool committing durable workflow state.
+    activeFlow = "destination";
 
     await dispatchDynamicInstructionEvent({
       ctx,
@@ -289,7 +297,11 @@ describe("dispatchDynamicInstructionEvent", () => {
       event: makeEvent("step.started"),
     });
 
-    expect(handler).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledOnce();
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { role: "system", content: "Safety instructions." },
+      { role: "system", content: "destination procedure." },
+    ]);
   });
 
   it("ignores events outside the allowed set", async () => {
