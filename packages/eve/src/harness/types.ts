@@ -307,6 +307,8 @@ export interface ToolLoopHarnessConfig {
    * authoritative server-side metadata.
    */
   readonly runtimeIdentity?: RuntimeIdentity;
+  /** Delays prompt assembly until `step.started` dynamic instructions resolve. */
+  readonly stepDynamicInstructions?: boolean;
   /**
    * Unified tool definitions for this harness step.
    *
