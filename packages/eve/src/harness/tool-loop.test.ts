@@ -17,6 +17,7 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  LiveStepDynamicInstructionsKey,
   LiveStepDynamicModelSelectionKey,
   LiveStepToolsKey,
   ParentSessionKey,
@@ -4640,10 +4641,9 @@ describe("createToolLoopHarness", () => {
     });
 
     it("retries with the offending tool dropped and a one-shot system note", async () => {
-      const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
-        runtimeContext: {
-          "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
-        },
+      let attemptIndex = 0;
+      const resolveRuntimeContext = vi.fn((_input: InstrumentationStepStartedEventInput) => ({
+        runtimeContext: { "test.attempt": attemptIndex++ === 0 ? "original" : "retry" },
       }));
       declareTelemetry({
         events: {
@@ -4699,9 +4699,21 @@ describe("createToolLoopHarness", () => {
         ]),
       };
 
-      const { emit, events } = createEventCollector();
+      const events: UnstampedMessageStreamEvent[] = [];
+      const ctx = new ContextContainer();
+      ctx.set(SessionDynamicInstructionsKey, {
+        flow: [{ role: "system", content: "source procedure" }],
+      });
+      const emit: HarnessEmitFn = async (event) => {
+        events.push(event);
+        if (event.type === "step.started") {
+          ctx.setVirtualContext(LiveStepDynamicInstructionsKey, {
+            flow: [{ role: "system", content: "destination procedure" }],
+          });
+        }
+      };
       const runStep = createToolLoopHarness({ ...config, handleEvent: emit });
-      const result = await runStep(session, { message: "Hi" });
+      const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
       // The second agent was constructed for the retry.
       expect(constructedCalls.count()).toBe(2);
@@ -4740,6 +4752,11 @@ describe("createToolLoopHarness", () => {
       expect(retryInstructions.role).toBe("system");
       expect(retryInstructions.content).toContain("web_search");
       expect(retryInstructions.content).toContain("not available");
+      for (const modelCall of vi.mocked(ToolLoopAgent).mock.calls) {
+        const instructions = JSON.stringify(modelCall[0].instructions);
+        expect(instructions).toContain("destination procedure");
+        expect(instructions).not.toContain("source procedure");
+      }
       expect(resolveRuntimeContext.mock.calls[1]?.[0].modelInput.instructions).toEqual(
         retryInstructions,
       );
@@ -11135,6 +11152,101 @@ describe("createToolLoopHarness", () => {
         { content: "Hello.", role: "user" },
         { content: "ok", role: "assistant" },
       ]);
+    });
+
+    it("replaces a source procedure after a tool changes flow state", async () => {
+      let activeFlow = "source";
+      const transitionFlow = vi.fn(() => {
+        activeFlow = "destination";
+      });
+      const firstResponse = {
+        messages: [
+          {
+            content: [
+              {
+                input: {},
+                toolCallId: "flow-1",
+                toolName: "enter_destination_flow",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: "flow changed",
+                toolCallId: "flow-1",
+                toolName: "enter_destination_flow",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      };
+      const firstResult: Record<string, unknown> = {
+        finishReason: "tool-calls",
+        text: "",
+        toolCalls: [{ input: {}, toolCallId: "flow-1", toolName: "enter_destination_flow" }],
+        toolResults: [
+          { output: "flow changed", toolCallId: "flow-1", toolName: "enter_destination_flow" },
+        ],
+      };
+      Object.defineProperty(firstResult, "response", {
+        enumerable: true,
+        get: () => {
+          if (activeFlow === "source") {
+            transitionFlow();
+          }
+          return firstResponse;
+        },
+      });
+      setupMockAgent(firstResult);
+
+      const ctx = new ContextContainer();
+      ctx.set(SessionDynamicInstructionsKey, {
+        business: [{ role: "system" as const, content: "business rules" }],
+        flow: [{ role: "system" as const, content: "durable source procedure" }],
+        safety: [{ role: "system" as const, content: "safety rules" }],
+      });
+      const emit: HarnessEmitFn = async (event) => {
+        if (event.type === "step.started") {
+          ctx.setVirtualContext(LiveStepDynamicInstructionsKey, {
+            flow: [{ role: "system" as const, content: `${activeFlow} procedure` }],
+          });
+        }
+      };
+      const config = createTestConfig("conversation", emit);
+
+      const firstStep = await contextStorage.run(ctx, () =>
+        createToolLoopHarness(config)(createTestSession(), { message: "Start" }),
+      );
+      expect(typeof firstStep.next).toBe("function");
+      expect(transitionFlow).toHaveBeenCalledOnce();
+
+      ctx.clearVirtualContext();
+      setupMockAgent(defaultModelResult());
+      const secondStep = await contextStorage.run(ctx, () =>
+        createToolLoopHarness(config)(firstStep.session),
+      );
+      expect(secondStep.next).toBeNull();
+
+      const firstInstructions = JSON.stringify(
+        vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions,
+      );
+      const secondInstructions = JSON.stringify(
+        vi.mocked(ToolLoopAgent).mock.calls[1]?.[0].instructions,
+      );
+
+      expect(firstInstructions).toContain("source procedure");
+      expect(firstInstructions).not.toContain("destination procedure");
+      expect(secondInstructions).toContain("destination procedure");
+      expect(secondInstructions).not.toContain("source procedure");
+      for (const instructions of [firstInstructions, secondInstructions]) {
+        expect(instructions).toContain("safety rules");
+        expect(instructions).toContain("business rules");
+      }
     });
 
     it("preserves the Anthropic system cache breakpoint when merging instructions", async () => {

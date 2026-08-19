@@ -16,7 +16,9 @@ const {
 } = await import("#context/dynamic-instruction-lifecycle.js");
 
 import { ContextContainer } from "#context/container.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
+  LiveStepDynamicInstructionsKey,
   SessionDynamicInstructionsKey,
   TurnDynamicInstructionsKey,
   SessionIdKey,
@@ -429,9 +431,37 @@ describe("dispatchDynamicInstructionEvent", () => {
     ]);
   });
 
-  it("rejects step.started events for instructions", async () => {
+  it("preserves existing session + turn composition for the same resolver", async () => {
     const ctx = createCtx();
-    const handler = vi.fn(() => defineInstructions({ markdown: "nope" }));
+    const resolver = createResolver("context", ["session.started", "turn.started"], (event) =>
+      defineInstructions({
+        markdown:
+          (event as UnstampedMessageStreamEvent).type === "session.started" ? "Session." : "Turn.",
+      }),
+    );
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { role: "system", content: "Session." },
+      { role: "system", content: "Turn." },
+    ]);
+  });
+
+  it("stores step-scoped instructions in virtual context", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => defineInstructions({ markdown: "Step context." }));
     const resolver = createResolver("context", ["step.started"], handler);
 
     await dispatchDynamicInstructionEvent({
@@ -441,7 +471,144 @@ describe("dispatchDynamicInstructionEvent", () => {
       event: makeEvent("step.started"),
     });
 
-    expect(handler).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledOnce();
+    expect(ctx.get(LiveStepDynamicInstructionsKey)).toEqual({
+      context: [{ role: "system", content: "Step context." }],
+    });
+    expect([...ctx.entries()].map(([key]) => key.name)).not.toContain(
+      "eve.liveStepDynamicInstructions",
+    );
+  });
+
+  it("step instructions replace the same resolver's wider-scope value", async () => {
+    const ctx = createCtx();
+    ctx.set(SessionDynamicInstructionsKey, {
+      context: [{ role: "system", content: "Session context." }],
+      sessionOnly: [{ role: "system", content: "Session only." }],
+    });
+    ctx.set(TurnDynamicInstructionsKey, {
+      context: [{ role: "system", content: "Turn context." }],
+      turnOnly: [{ role: "system", content: "Turn only." }],
+    });
+    const resolver = createResolver("context", ["step.started"], () =>
+      defineInstructions({ markdown: "Step context." }),
+    );
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { role: "system", content: "Session only." },
+      { role: "system", content: "Turn only." },
+      { role: "system", content: "Step context." },
+    ]);
+  });
+
+  it("null step result omits the same resolver's wider-scope value", async () => {
+    const ctx = createCtx();
+    ctx.set(TurnDynamicInstructionsKey, {
+      context: [{ role: "system", content: "Turn context." }],
+    });
+    const resolver = createResolver("context", ["step.started"], () => null);
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    expect(ctx.get(LiveStepDynamicInstructionsKey)).toEqual({ context: null });
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([]);
+  });
+
+  it("step resolver failures retain the wider-scope value", async () => {
+    const ctx = createCtx();
+    ctx.set(TurnDynamicInstructionsKey, {
+      context: [{ role: "system", content: "Turn context." }],
+    });
+    const resolver = createResolver("context", ["step.started"], () => {
+      throw new Error("resolver exploded");
+    });
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { role: "system", content: "Turn context." },
+    ]);
+  });
+
+  it("clears step instructions with virtual context", async () => {
+    const ctx = createCtx();
+    ctx.set(TurnDynamicInstructionsKey, {
+      context: [{ role: "system", content: "Turn context." }],
+    });
+    ctx.setVirtualContext(LiveStepDynamicInstructionsKey, {
+      context: [{ role: "system", content: "Step context." }],
+    });
+
+    ctx.clearVirtualContext();
+
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { role: "system", content: "Turn context." },
+    ]);
+  });
+
+  it("does not restore a stale step layer during workflow replay", async () => {
+    const ctx = createCtx();
+    ctx.set(TurnDynamicInstructionsKey, {
+      flow: [{ role: "system", content: "durable source procedure" }],
+    });
+    ctx.setVirtualContext(LiveStepDynamicInstructionsKey, {
+      flow: [{ role: "system", content: "stale step procedure" }],
+    });
+
+    const replayed = await deserializeContext(serializeContext(ctx));
+
+    expect(buildDynamicInstructionMessages(replayed)).toEqual([
+      { role: "system", content: "durable source procedure" },
+    ]);
+    expect(replayed.get(LiveStepDynamicInstructionsKey)).toBeUndefined();
+  });
+
+  it("re-resolves the step layer without leaking the previous step", async () => {
+    const ctx = createCtx();
+    let flow = "source";
+    const resolver = createResolver("flow", ["step.started"], () =>
+      defineInstructions({ markdown: `${flow} procedure` }),
+    );
+
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { role: "system", content: "source procedure" },
+    ]);
+
+    ctx.clearVirtualContext();
+    flow = "destination";
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("step.started"),
+    });
+
+    expect(buildDynamicInstructionMessages(ctx)).toEqual([
+      { role: "system", content: "destination procedure" },
+    ]);
   });
 
   it("ignores events outside the allowed set", async () => {

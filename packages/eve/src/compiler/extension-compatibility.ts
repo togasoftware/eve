@@ -50,8 +50,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   dynamicSkill: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 13,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    current: 14,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
     dropped: {},
   },
   config: { current: 1, supported: [1], dropped: {} },
