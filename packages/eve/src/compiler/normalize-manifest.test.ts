@@ -265,16 +265,17 @@ describe("compileAgentManifest", () => {
       instructions: [createModuleSourceRef({ logicalPath: "instructions/dynamic.ts" })],
     });
     mocks.compileAgentConfig.mockResolvedValue(createConfig({ name: "root" }));
+    const unsupportedEvent = "message.created" as "step.started";
     mocks.loadModuleBackedDefinition.mockResolvedValue(
       defineDynamic({
         events: {
-          "step.started": () => defineInstructions({ content: "Too late." }),
+          [unsupportedEvent]: () => defineInstructions({ content: "Unsupported." }),
         },
       }),
     );
 
     await expect(compileAgentManifest(manifest)).rejects.toThrow(
-      'Unsupported event: "step.started"',
+      'Unsupported event: "message.created"',
     );
   });
 

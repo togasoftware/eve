@@ -250,7 +250,7 @@ Skills follow the same naming rule as tools: a single `defineSkill(...)` is name
 
 ## Dynamic instructions
 
-A dynamic instructions file returns `defineInstructions({ content, role? })` built from the principal, tenant, channel, or external data. Omit `role` for system context:
+A dynamic instructions file returns `defineInstructions({ content, role? })` built from the principal, tenant, channel, external data, or durable agent state. Omit `role` for system context:
 
 ```ts title="agent/instructions/persona.ts"
 import { defineDynamic, defineInstructions } from "eve/instructions";
@@ -283,13 +283,39 @@ export default defineDynamic({
 });
 ```
 
-Instruction resolvers support `session.started` and `turn.started` only. A system result lives in that scope and stays outside history. A user result is appended to history at the lifecycle boundary, with session results before turn results and both before the current delivery. There is no automatic deduplication: returning the same user content on a later turn intentionally appends another message.
+Use `turn.started` when instructions can change between user messages. Use `step.started` when a tool can change the state that determines the instructions and the model's continuation must see the replacement immediately:
+
+```ts title="agent/instructions/flow.ts"
+import { defineDynamic, defineInstructions } from "eve/instructions";
+import { activeFlow, buildFlowInstructions } from "../lib/flow";
+
+export default defineDynamic({
+  events: {
+    "step.started": () =>
+      defineInstructions({
+        content: buildFlowInstructions(activeFlow.get()),
+      }),
+  },
+});
+```
+
+System-role instruction resolvers support `session.started`, `turn.started`, and `step.started`. A system result stays outside history. User-role results support session and turn scope and are appended to history at the lifecycle boundary, with session results before turn results and both before the current delivery. There is no automatic deduplication: returning the same user content on a later turn intentionally appends another message.
 
 Resolver snapshots reflect that order. At `session.started`, `ctx.messages` includes static user-role instructions. At `turn.started`, it also includes user-role results from `session.started`. These augmented snapshots are specific to instruction resolvers; tools, skills, models, and subagents keep their existing message snapshots.
 
+| Event             | Resolver runs          | Instructions apply to           |
+| ----------------- | ---------------------- | ------------------------------- |
+| `session.started` | Once per session       | Every model call in the session |
+| `turn.started`    | Once per turn          | Every model call in the turn    |
+| `step.started`    | Before each model call | That model call                 |
+
+For one instructions file, a step result replaces its session and turn instructions for that model call. Session and turn handlers keep their existing additive composition when no step handler is present. A `null` step result omits that file's wider-scope instructions for the call; a thrown resolver retains the wider-scope value. Step values are not serialized and resolve again before the next model call.
+
 Returning `null` or blank content contributes nothing. A throwing or invalid session resolver leaves any wider valid system selection in place. Every turn starts with fresh turn-scoped system instructions, so a failed or empty turn result cannot leak the previous turn's value. Completed lifecycle steps are replay-safe: parking, resuming, or replaying them does not duplicate user-role messages.
 
-Dynamic system content that changes frequently can reduce provider prompt-cache reuse. Prefer session scope for stable values and use turn scope only when the context must be refreshed. Cache behavior remains provider-specific.
+Dynamic system content that changes frequently can reduce provider prompt-cache reuse. Prefer session scope for stable values, turn scope when the context must refresh between messages, and step scope only when the model continuation must observe a mid-turn state transition. Cache behavior remains provider-specific.
+
+Instructions and skills resolve before the prompt is assembled, so the model sees the right context for whoever is calling without that context reaching anyone else.
 
 ## What to read next
 

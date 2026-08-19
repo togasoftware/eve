@@ -243,7 +243,6 @@ function typeOnlyFixtures(): void {
     events: {
       "session.started": () => defineInstructions({ content: "Session." }),
       "turn.started": async () => defineInstructions({ content: "Turn.", role: "user" }),
-      // @ts-expect-error Dynamic instructions do not support step scope.
       "step.started": () => defineInstructions({ content: "Step." }),
     },
   });
