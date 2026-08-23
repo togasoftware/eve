@@ -72,13 +72,13 @@ Static instructions never run code at runtime. When you need typed executable be
 
 ## Dynamic instructions
 
-To resolve instructions from session context (auth, tenant, channel, or external data), wrap `defineInstructions` in `defineDynamic`. Instruction resolvers support `session.started` and `turn.started`, not `step.started`, and may return `null` to contribute nothing.
+To resolve instructions from session context (auth, tenant, channel, or external data), turn context, or step-local state, wrap `defineInstructions` in `defineDynamic`. System-role instruction resolvers support `session.started`, `turn.started`, and `step.started`, and may return `null` to contribute nothing. User-role results support session and turn scope only.
 
 A dynamic system result applies at its lifecycle scope. A dynamic user result is appended to durable history at that boundary: session results before turn results, and both before the current delivery. Completed workflow steps are replay-safe, so parking, resuming, or replaying one does not append the message again.
 
 The `messages` snapshot passed to a `session.started` resolver includes static user instructions. A `turn.started` resolver additionally sees user instructions produced at `session.started`. Other dynamic capability resolvers keep their existing snapshots.
 
-See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior.
+Step-scoped system instructions resolve before each model call and replace the same file's wider-scope value for that call. See [Dynamic capabilities](./guides/dynamic-capabilities) for examples and failure behavior.
 
 ## History controls and prompt caching
 

@@ -26,13 +26,8 @@ export const ALLOWED_DYNAMIC_TOOL_EVENTS: ReadonlySet<string> = new Set<DynamicT
   "step.started",
 ]);
 
-/**
- * Instructions and skills are restricted to session/turn boundaries.
- * Keeping their resolved context stable within a turn avoids changing the
- * model input between tool-loop steps.
- */
 export const ALLOWED_DYNAMIC_INSTRUCTION_EVENTS: ReadonlySet<string> =
-  new Set<DynamicToolEventName>(["session.started", "turn.started"]);
+  new Set<DynamicToolEventName>(["session.started", "turn.started", "step.started"]);
 
 export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>([
   "session.started",

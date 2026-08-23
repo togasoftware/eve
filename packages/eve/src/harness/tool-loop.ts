@@ -1339,32 +1339,25 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // AI SDK rejects role:"system" in `messages` — route system entries
     // from durable history to `instructions` instead.
-    const systemMessages: SystemModelMessage[] = [];
+    const historySystemEntries: SystemModelMessage[] = [];
     const nonSystemMessages: ModelMessage[] = [];
     for (const entry of hydratedMessages) {
       if (entry.role === "system") {
-        systemMessages.push(entry);
+        historySystemEntries.push(entry);
       } else {
         nonSystemMessages.push(entry);
       }
     }
-    if (ctx !== undefined) {
-      systemMessages.push(...buildDynamicInstructionMessages(ctx));
-      const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
-      if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        systemMessages.push({ role: "system", content: skillAnnouncement });
-      }
-      const taskState = ctx.get(TurnTaskStateKey);
-      if (taskState !== undefined) {
-        systemMessages.push({ role: "system", content: taskState });
-      }
-    }
-    if (deliveryInstruction !== undefined) {
-      systemMessages.push({
-        role: "system",
-        content: deliveryInstruction,
-      });
-    }
+    const skillAnnouncement = ctx?.get(PendingSkillAnnouncementKey);
+    const skillAnnouncementEntries: SystemModelMessage[] =
+      skillAnnouncement !== undefined && skillAnnouncement.length > 0
+        ? [{ role: "system", content: skillAnnouncement }]
+        : [];
+    const taskState = ctx?.get(TurnTaskStateKey);
+    const taskStateEntries: SystemModelMessage[] =
+      taskState === undefined ? [] : [{ role: "system", content: taskState }];
+    const deliveryInstructionEntries: SystemModelMessage[] =
+      deliveryInstruction === undefined ? [] : [{ role: "system", content: deliveryInstruction }];
 
     const modelMessages = nonSystemMessages;
 
@@ -1375,9 +1368,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const baseSystemEntry: SystemModelMessage[] = session.agent.system
         ? [{ role: "system" as const, content: session.agent.system }]
         : [];
+      const dynamicSystemEntries = ctx === undefined ? [] : buildDynamicInstructionMessages(ctx);
       const rawInstructions =
-        systemMessages.length > 0 || extraSystemEntry.length > 0
-          ? [...extraSystemEntry, ...baseSystemEntry, ...systemMessages]
+        historySystemEntries.length > 0 ||
+        dynamicSystemEntries.length > 0 ||
+        skillAnnouncementEntries.length > 0 ||
+        taskStateEntries.length > 0 ||
+        deliveryInstructionEntries.length > 0 ||
+        extraSystemEntry.length > 0
+          ? [
+              ...extraSystemEntry,
+              ...baseSystemEntry,
+              ...historySystemEntries,
+              ...dynamicSystemEntries,
+              ...skillAnnouncementEntries,
+              ...taskStateEntries,
+              ...deliveryInstructionEntries,
+            ]
           : undefined;
       const markedInstructions =
         rawInstructions !== undefined && marker
@@ -1722,7 +1729,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Resolve first-attempt instrumentation after step.started dynamic
     // capabilities have updated the effective prompt and toolset.
     const initialModelCallInput = prepareModelCallInput();
-
     // Workflow continuations replay the sandbox after step.started so nested
     // action lifecycle events keep the active turn's emission coordinates.
     const pendingWorkflowInterrupt = await continuePendingWorkflowInterrupt({

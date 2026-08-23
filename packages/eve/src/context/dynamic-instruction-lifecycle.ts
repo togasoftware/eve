@@ -14,6 +14,7 @@ import type { AlsContext, ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   DynamicInstructionResolveMessagesKey,
+  LiveStepDynamicInstructionsKey,
   PendingDynamicInstructionUserMessagesKey,
   SessionDynamicInstructionsKey,
   TurnDynamicInstructionsKey,
@@ -53,15 +54,28 @@ function durableKeyForEvent(eventType: string): ContextKey<SlugMessageMap> | und
 }
 
 /**
- * Builds the flattened system messages from session + turn durable keys.
- * Session-scoped entries appear first.
+ * Builds the flattened system messages from session, turn, and step keys.
+ * A step entry shadows the same resolver's durable session and turn entries
+ * for one model call. Existing session + turn composition remains additive.
+ * Entries retain scope order: session first, then turn, then step.
  */
 export function buildDynamicInstructionMessages(ctx: {
   get<T>(key: ContextKey<T>): T | undefined;
 }): SystemModelMessage[] {
   const session = ctx.get(SessionDynamicInstructionsKey) ?? {};
   const turn = ctx.get(TurnDynamicInstructionsKey) ?? {};
-  return [...Object.values(session).flat(), ...Object.values(turn).flat()];
+  const step = ctx.get(LiveStepDynamicInstructionsKey) ?? {};
+  const stepSlugs = new Set(Object.keys(step));
+
+  return [
+    ...Object.entries(session)
+      .filter(([slug]) => !stepSlugs.has(slug))
+      .flatMap(([, messages]) => messages),
+    ...Object.entries(turn)
+      .filter(([slug]) => !stepSlugs.has(slug))
+      .flatMap(([, messages]) => messages),
+    ...Object.values(step).flatMap((messages) => messages ?? []),
+  ];
 }
 
 /** Starts the instructions-only virtual context for one lifecycle preamble. */
@@ -85,7 +99,9 @@ export function drainDynamicInstructionUserMessages(ctx: AlsContext): ModelMessa
  * Dispatches a stream event to dynamic instruction resolvers.
  *
  * Each resolver's output replaces its own slot (keyed by slug) in the
- * scope-appropriate durable key (session or turn). The tool-loop calls
+ * scope-appropriate key. Session and turn values are durable; step values
+ * are virtual and shadow the same resolver's wider-scope value for one model
+ * call. The tool-loop calls
  * {@link buildDynamicInstructionMessages} to assemble the flattened
  * result for the model call.
  */
@@ -107,9 +123,6 @@ export async function dispatchDynamicInstructionEvent(input: {
 
   const matching = resolvers.filter((r) => r.eventNames.includes(event.type));
   if (matching.length === 0) return;
-
-  const durableKey = durableKeyForEvent(event.type);
-  if (durableKey === undefined) return;
 
   const resolveMessages = ctx.get(DynamicInstructionResolveMessagesKey) ?? messages;
   const pendingUserMessages = ctx.get(PendingDynamicInstructionUserMessagesKey) ?? [];
@@ -142,8 +155,35 @@ export async function dispatchDynamicInstructionEvent(input: {
     }),
   );
 
-  const durable = { ...ctx.get(durableKey) };
+  if (event.type === "step.started") {
+    const resolved: Record<string, readonly SystemModelMessage[] | null> = {};
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") {
+        log.error(`Dynamic instructions resolver (${event.type}) threw — skipping.`, {
+          error: toErrorMessage(outcome.reason),
+        });
+        continue;
+      }
+      if (outcome.value === null) continue;
 
+      const { resolver, instruction } = outcome.value;
+      if (instruction === undefined) {
+        resolved[resolver.slug] = null;
+      } else if (instruction.role === "system") {
+        resolved[resolver.slug] = [instruction.message];
+      } else {
+        log.error(
+          `Dynamic instructions resolver "${resolver.slug}" returned user-role instructions for step.started — use system-role instructions at step scope.`,
+        );
+      }
+    }
+    ctx.setVirtualContext(LiveStepDynamicInstructionsKey, resolved);
+    return;
+  }
+
+  const durableKey = durableKeyForEvent(event.type);
+  if (durableKey === undefined) return;
+  const durable = { ...ctx.get(durableKey) };
   for (const outcome of outcomes) {
     if (outcome.status === "rejected") {
       log.error(`Dynamic instructions resolver (${event.type}) threw — skipping.`, {

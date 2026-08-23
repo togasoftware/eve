@@ -84,7 +84,7 @@ export async function compileInstructionsEntry(
     );
     if (unsupportedEvent !== undefined) {
       throw new Error(
-        `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to use only "session.started" or "turn.started" events. Unsupported event: "${unsupportedEvent}".`,
+        `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to use only "session.started", "turn.started", or "step.started" events. Unsupported event: "${unsupportedEvent}".`,
       );
     }
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");

@@ -30,14 +30,14 @@ export function defineInstructions<TInstructions extends InstructionsDefinition>
 export type DynamicInstructionsResult = InstructionsDefinition | null;
 
 export type DynamicInstructionsEvents = {
-  readonly [K in "session.started" | "turn.started"]?: (
+  readonly [K in "session.started" | "turn.started" | "step.started"]?: (
     event: unknown,
     ctx: DynamicResolveContext,
   ) => DynamicInstructionsResult | Promise<DynamicInstructionsResult>;
 };
 
 /**
- * Defines a runtime instructions resolver for session and turn boundaries.
+ * Defines a runtime instructions resolver for session, turn, and step boundaries.
  */
 export function defineDynamic<const TEvents extends DynamicInstructionsEvents>(definition: {
   readonly events: ExactDefinition<TEvents, DynamicInstructionsEvents>;
