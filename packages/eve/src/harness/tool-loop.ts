@@ -1501,7 +1501,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Resolve first-attempt instrumentation after step.started dynamic
     // capabilities have updated the effective prompt and toolset.
     const initialModelCallInput = prepareModelCallInput();
-
     // Workflow continuations replay the sandbox after step.started so nested
     // action lifecycle events keep the active turn's emission coordinates.
     const pendingWorkflowInterrupt = await continuePendingWorkflowInterrupt({
