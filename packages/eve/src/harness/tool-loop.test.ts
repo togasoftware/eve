@@ -12513,7 +12513,7 @@ describe("createToolLoopHarness", () => {
           });
         }
       };
-      const config = createTestConfig("conversation", emit);
+      const config = createTestConfig(emit);
 
       const firstStep = await contextStorage.run(ctx, () =>
         createToolLoopHarness(config)(createTestSession(), { message: "Start" }),
