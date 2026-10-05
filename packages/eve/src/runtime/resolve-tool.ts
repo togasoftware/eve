@@ -195,6 +195,13 @@ function extractOptionalHooks(
     ) as ResolvedToolDefinition["toModelOutput"];
   }
 
+  if (record.toAssistantMessage !== undefined) {
+    optional.toAssistantMessage = expectFunction(
+      record.toAssistantMessage,
+      describe(definition, "to provide a toAssistantMessage function"),
+    ) as ResolvedToolDefinition["toAssistantMessage"];
+  }
+
   return optional;
 }
 

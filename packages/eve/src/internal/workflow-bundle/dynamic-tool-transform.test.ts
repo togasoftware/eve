@@ -62,6 +62,7 @@ async function transformAndEval(
         approvalKey: entry.approvalKey as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
+        toAssistantMessage: entry.toAssistantMessage as never,
       }),
     );
     return Object.assign(entry, { [Symbol.for("eve:tool-brand")]: true });
@@ -157,6 +158,9 @@ export default defineDynamic({
           toModelOutput(output) {
             return { type: "text", value: projectionPrefix + ":" + output };
           },
+          toAssistantMessage(output) {
+            return output === "done" ? resultPrefix : null;
+          },
         }),
       };
     },
@@ -175,6 +179,7 @@ export default defineDynamic({
       "approvalRequest",
       "approvalResponse",
       "toModelOutput",
+      "toAssistantMessage",
     ]);
     expect(callbacks.execute!.closure).toEqual({ executePrefix: "execute" });
     expect(callbacks.label?.start?.closure).toEqual({ labelPrefix: "Deploy" });
@@ -183,6 +188,7 @@ export default defineDynamic({
     expect(callbacks.approvalRequest!.closure).toEqual({ requestReason: "confirm" });
     expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
     expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
+    expect(callbacks.toAssistantMessage!.closure).toEqual({ resultPrefix: "Deployed to" });
     const callbackValues = [
       callbacks.execute,
       callbacks.label?.start,
@@ -191,8 +197,9 @@ export default defineDynamic({
       callbacks.approvalRequest,
       callbacks.approvalResponse,
       callbacks.toModelOutput,
+      callbacks.toAssistantMessage,
     ];
-    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(7);
+    expect(new Set(callbackValues.map((callback) => callback!.callback)).size).toBe(8);
     for (const callback of callbackValues) expect(callback!.callback).toBeTypeOf("function");
   });
 

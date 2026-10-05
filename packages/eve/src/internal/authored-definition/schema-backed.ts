@@ -244,6 +244,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     expectFunction(record.toModelOutput, message);
   }
 
+  if (record.toAssistantMessage !== undefined) {
+    expectFunction(record.toAssistantMessage, message);
+  }
+
   if (record.auth !== undefined) {
     const auth = expectObjectRecord(record.auth, message);
     expectFunction(auth.getToken, message);

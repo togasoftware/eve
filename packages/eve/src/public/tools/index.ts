@@ -8,6 +8,7 @@ export {
   disableTool,
   isDisabledToolSentinel,
   type ToolLabelDefinition,
+  type ToolAssistantMessage,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,

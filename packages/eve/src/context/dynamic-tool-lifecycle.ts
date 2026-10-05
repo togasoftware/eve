@@ -207,7 +207,8 @@ export function validateDurableDynamicToolCallbacks(
       key !== "approvalKey" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
-      key !== "toModelOutput",
+      key !== "toModelOutput" &&
+      key !== "toAssistantMessage",
   );
   if (unknownPhases.length > 0) {
     throw new Error(
@@ -276,6 +277,13 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.toModelOutput,
     required: entry.toModelOutput !== undefined,
   });
+  const toAssistantMessage = validateReference({
+    name,
+    owner,
+    phase: "toAssistantMessage",
+    stamped: raw.toAssistantMessage,
+    required: entry.toAssistantMessage !== undefined,
+  });
 
   const inputSchema = validateReference({
     name,
@@ -305,6 +313,7 @@ export function validateDurableDynamicToolCallbacks(
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
+    toAssistantMessage?: DurableDynamicCallbackReference;
   } = { execute };
   if (inputSchema !== undefined) callbacks.inputSchema = inputSchema;
   if (outputSchema !== undefined) callbacks.outputSchema = outputSchema;
@@ -319,6 +328,7 @@ export function validateDurableDynamicToolCallbacks(
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;
+  if (toAssistantMessage !== undefined) callbacks.toAssistantMessage = toAssistantMessage;
   return callbacks;
 }
 
