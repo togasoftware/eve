@@ -12,6 +12,7 @@ export type DurableDynamicCallbackPhase =
   | "approvalResponse"
   | "execute"
   | "toModelOutput"
+  | "toAssistantMessage"
   | "inputSchema"
   | "outputSchema";
 
@@ -41,6 +42,7 @@ export interface DurableDynamicToolCallbacks {
   readonly approvalRequest?: DurableDynamicCallbackReference;
   readonly approvalResponse?: DurableDynamicCallbackReference;
   readonly toModelOutput?: DurableDynamicCallbackReference;
+  readonly toAssistantMessage?: DurableDynamicCallbackReference;
 }
 
 /** Live descriptor stamped on authored callbacks; `callback` never persists. */
@@ -62,6 +64,7 @@ export type LiveDurableDynamicToolCallbacks = Partial<{
   approvalRequest: StampedDurableDynamicCallback;
   approvalResponse: StampedDurableDynamicCallback;
   toModelOutput: StampedDurableDynamicCallback;
+  toAssistantMessage: StampedDurableDynamicCallback;
 }>;
 
 const STAMPED_CALLBACK = Symbol.for("eve:durable-dynamic-callback");
@@ -185,6 +188,7 @@ function durableCallbackPhases(
     ["approvalRequest", callbacks.approvalRequest],
     ["approvalResponse", callbacks.approvalResponse],
     ["toModelOutput", callbacks.toModelOutput],
+    ["toAssistantMessage", callbacks.toAssistantMessage],
   ];
   return entries.flatMap(([phase, reference]) => (reference === undefined ? [] : [phase]));
 }
@@ -275,6 +279,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   readonly approvalKey?: (...args: never[]) => unknown;
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
+  readonly toAssistantMessage?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
   const labelComplete = readDurableDynamicCallback(input.label?.complete);
   const labelDelta = readDurableDynamicCallback(input.label?.delta);
@@ -291,6 +296,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   const approvalKey = readDurableDynamicCallback(input.approvalKey);
   const execute = readDurableDynamicCallback(input.execute);
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
+  const toAssistantMessage = readDurableDynamicCallback(input.toAssistantMessage);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
   const inputSchema = readDurableSchema(input.inputSchema);
   const outputSchema = readDurableSchema(input.outputSchema);
@@ -308,6 +314,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;
+  if (toAssistantMessage !== undefined) callbacks.toAssistantMessage = toAssistantMessage;
   return callbacks;
 }
 

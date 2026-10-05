@@ -2885,6 +2885,27 @@ async function handleStepResult(input: {
     (continuationMessages.at(-1)?.role === "tool" ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasRunnableDeferredStepInput(nextSession));
+
+  const runtimeAssistantMessage =
+    config.mode === "conversation" &&
+    nextSession.outputSchema === undefined &&
+    result.finishReason === "tool-calls" &&
+    continuationMessages.at(-1)?.role === "tool" &&
+    !hasRunnableDeferredStepInput(nextSession)
+      ? await resolveRuntimeAssistantMessage({
+          result,
+          tools: input.coordinationTools,
+        })
+      : null;
+  if (runtimeAssistantMessage !== null) {
+    return finishConversationTurnWithRuntimeAssistantMessage({
+      emissionState: advanceStep(emissionState),
+      emit,
+      message: runtimeAssistantMessage,
+      session: nextSession,
+    });
+  }
+
   if (continueLoop) {
     if (emit) {
       emissionState = advanceStep(emissionState);
@@ -2931,6 +2952,75 @@ async function handleStepResult(input: {
     session: nextSession,
     stepOutput,
   });
+}
+
+async function resolveRuntimeAssistantMessage(input: {
+  readonly result: HarnessStepResult;
+  readonly tools: HarnessToolMap;
+}): Promise<string | null> {
+  const messages: Array<{ readonly callId: string; readonly message: string }> = [];
+
+  for (const result of input.result.toolResults ?? []) {
+    if (result.type !== "tool-result" || result.providerExecuted === true) continue;
+    const project = input.tools.get(result.toolName)?.toAssistantMessage;
+    if (project === undefined) continue;
+
+    const message = await project(result.output);
+    if (message === null || message === undefined) continue;
+    if (typeof message !== "string" || message.trim().length === 0) {
+      throw new TypeError(
+        `Tool "${result.toolName}" toAssistantMessage must return a non-empty string, null, or undefined.`,
+      );
+    }
+    messages.push({ callId: result.toolCallId, message });
+  }
+
+  if (messages.length > 1) {
+    throw new Error(
+      `Multiple tool results requested a runtime-authored assistant message in one step (${messages
+        .map((entry) => entry.callId)
+        .join(", ")}). Only one terminal message is allowed.`,
+    );
+  }
+
+  return messages[0]?.message ?? null;
+}
+
+async function finishConversationTurnWithRuntimeAssistantMessage(input: {
+  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
+  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
+  readonly message: string;
+  readonly session: HarnessSession;
+}): Promise<StepResult> {
+  const { emit, message } = input;
+  let { emissionState, session } = input;
+  session = clearTurnClientContextState({
+    ...session,
+    history: validateHarnessModelMessages([
+      ...session.history,
+      { content: message, role: "assistant" },
+    ]),
+  });
+
+  if (emit) {
+    await emit(
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message,
+        sequence: emissionState.sequence,
+        stepIndex: emissionState.stepIndex,
+        turnId: emissionState.turnId,
+      }),
+    );
+    emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+    session = setHarnessEmissionState(session, emissionState);
+  }
+
+  return {
+    next: null,
+    session,
+    settledTurn: { output: message },
+  };
 }
 
 /** Keeps a task session open until its background work settles. */

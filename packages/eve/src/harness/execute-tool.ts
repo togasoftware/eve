@@ -41,6 +41,9 @@ export interface HarnessToolDefinition {
   readonly rootOnly?: boolean;
   readonly runtimeAction?: HarnessRuntimeActionDefinition;
   readonly toModelOutput?: (output: unknown) => unknown;
+  readonly toAssistantMessage?: (
+    output: unknown,
+  ) => string | null | undefined | Promise<string | null | undefined>;
   /** Present when this tool starts an associated durable workflow. */
   readonly workflowId?: string;
 }

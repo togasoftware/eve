@@ -46,6 +46,7 @@ export interface CompileFromMemoryToolInput {
   readonly label?: ToolDefinition["label"];
   readonly approval?: ToolDefinition["approval"];
   readonly toModelOutput?: ToolDefinition["toModelOutput"];
+  readonly toAssistantMessage?: ToolDefinition["toAssistantMessage"];
 }
 
 export interface CompileFromMemorySkillInput {
@@ -129,5 +130,6 @@ function createMemoryToolDefinition(input: CompileFromMemoryToolInput): ToolDefi
     inputSchema: input.inputSchema ?? { additionalProperties: true, type: "object" },
     outputSchema: input.outputSchema,
     toModelOutput: input.toModelOutput,
+    toAssistantMessage: input.toAssistantMessage,
   });
 }

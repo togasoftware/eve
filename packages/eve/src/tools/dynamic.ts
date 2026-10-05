@@ -5,6 +5,7 @@ import type {
   PublicToolOutputSchema,
   ToolLabelDefinition,
   ToolContext,
+  ToolAssistantMessage,
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
@@ -29,11 +30,15 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;
   execute(input: TInput, ctx: ToolContext): TOutput | Promise<TOutput>;
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+  readonly toAssistantMessage?: (
+    output: TOutput,
+  ) => ToolAssistantMessage | Promise<ToolAssistantMessage>;
   /**
    * Optional per-call approval gate, mirroring the authored-tool
    * `approval` contract: return `"user-approval"` to require user approval
    * before the call executes. Dynamic approval request and response callbacks
-   * use the same durable descriptor boundary as `execute` and `toModelOutput`.
+   * use the same durable descriptor seam as `execute`, `toModelOutput`, and
+   * `toAssistantMessage`.
    */
   readonly approval?: Approval;
   /** Derives the input-scoped key recorded when this tool is approved. */

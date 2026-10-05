@@ -231,7 +231,7 @@ the handler.
 
 ## Dynamic tools
 
-Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. eve records durable descriptors for `execute`, approval request and response policies, input-scoped `approvalKey` callbacks, and `toModelOutput`, so a parked call can reconstruct the same callbacks in a fresh process.
+Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. eve records durable descriptors for `execute`, approval request and response policies, input-scoped `approvalKey` callbacks, `toModelOutput`, and `toAssistantMessage`, so a parked call can reconstruct the same callbacks in a fresh process.
 
 Dynamic tool executors receive the same `ToolContext` as static authored tools, including inline provider auth through `ctx.getToken(provider)` and `ctx.requireAuth(provider)`.
 
@@ -302,7 +302,7 @@ export function createSearchTool(baseUrl: string) {
 }
 ```
 
-Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, and `toModelOutput`.
+Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, `toModelOutput`, and `toAssistantMessage`.
 
 For live schemas created in a provider package, use `defineDurableSchema` from `eve/tools`. Put the schema's per-tool values in `closure` and construct the schema in `schema`. Plain JSON Schema objects need no helper.
 

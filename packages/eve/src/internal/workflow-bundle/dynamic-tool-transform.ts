@@ -22,6 +22,7 @@ type CallbackPhase =
   | "approvalResponse"
   | "execute"
   | "toModelOutput"
+  | "toAssistantMessage"
   | "inputSchema"
   | "outputSchema";
 type CallbackPropertyName =
@@ -35,6 +36,7 @@ type CallbackPropertyName =
   | "complete"
   | "delta"
   | "toModelOutput"
+  | "toAssistantMessage"
   | "inputSchema"
   | "outputSchema";
 
@@ -204,6 +206,14 @@ function collectToolCallbacks(
     findProperty(tool, "approvalKey"),
     "approvalKey",
     "approvalKey",
+    results,
+    nestedScopes,
+  );
+  collectCallbackProperty(
+    source,
+    findProperty(tool, "toAssistantMessage"),
+    "toAssistantMessage",
+    "toAssistantMessage",
     results,
     nestedScopes,
   );

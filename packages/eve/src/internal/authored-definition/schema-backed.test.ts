@@ -171,6 +171,21 @@ describe("normalizeToolDefinition", () => {
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
   });
 
+  it("accepts authored tools that declare a `toAssistantMessage` function", () => {
+    const tool = defineTool({
+      description: "Ask a follow-up.",
+      inputSchema: z.object({}),
+      execute() {
+        return { question: "Ready?" };
+      },
+      toAssistantMessage(output) {
+        return output.question;
+      },
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+  });
+
   it("normalizes authored tool output schemas", () => {
     const tool = defineTool({
       description: "Summarize.",

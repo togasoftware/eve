@@ -191,6 +191,12 @@ export type ResolvedToolDefinition = Readonly<
      * handlers and the stream. See {@link ToolModelOutput}.
      */
     readonly toModelOutput?: (output: unknown) => ToolModelOutput | Promise<ToolModelOutput>;
+    /** Optional successful-result projection to a terminal runtime-authored assistant message. */
+    readonly toAssistantMessage?: (
+      output: unknown,
+    ) =>
+      | import("#tools/definition.js").ToolAssistantMessage
+      | Promise<import("#tools/definition.js").ToolAssistantMessage>;
   };
 
 /**

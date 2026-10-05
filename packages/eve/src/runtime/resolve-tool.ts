@@ -121,7 +121,7 @@ export async function resolveToolDefinition(
  */
 type OptionalResolvedFields = {
   -readonly [
-    K in "label" | "approval" | "approvalKey" | "toModelOutput"
+    K in "label" | "approval" | "approvalKey" | "toModelOutput" | "toAssistantMessage"
   ]?: ResolvedToolDefinition[K];
 };
 
@@ -182,6 +182,13 @@ function extractOptionalHooks(
       record.toModelOutput,
       describe(definition, "to provide a toModelOutput function"),
     ) as ResolvedToolDefinition["toModelOutput"];
+  }
+
+  if (record.toAssistantMessage !== undefined) {
+    optional.toAssistantMessage = expectFunction(
+      record.toAssistantMessage,
+      describe(definition, "to provide a toAssistantMessage function"),
+    ) as ResolvedToolDefinition["toAssistantMessage"];
   }
 
   return optional;

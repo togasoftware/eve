@@ -294,6 +294,7 @@ function createRegisteredHarnessToolDefinition(input: {
     outputSchema: def.outputSchema,
     rootOnly: input.rootOnly,
     toModelOutput: def.toModelOutput,
+    toAssistantMessage: def.toAssistantMessage,
   };
   return definition;
 }

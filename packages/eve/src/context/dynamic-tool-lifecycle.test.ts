@@ -1612,6 +1612,11 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
           }),
           closure: { provider },
         }),
+        toAssistantMessage: defineDurableCallback({
+          callback: ({ provider: snapshotted }: { provider: string }, output: unknown) =>
+            output === "question" ? `Question from ${snapshotted}` : null,
+          closure: { provider },
+        }),
       }),
     }));
     const resolver = createResolver("session_provider", ["session.started"], handler);
@@ -1664,6 +1669,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       type: "json",
       value: { output: { result: "found" }, provider: "original-provider" },
     });
+    expect(await tool!.toAssistantMessage!("question")).toBe("Question from original-provider");
   });
 
   it("replays label callbacks", () => {

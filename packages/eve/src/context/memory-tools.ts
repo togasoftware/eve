@@ -128,6 +128,15 @@ function createProviderToolCallbacks(input: {
       closure,
     };
   }
+  if (input.tool.toAssistantMessage !== undefined) {
+    callbacks.toAssistantMessage = {
+      callback: async (rawClosure, output) =>
+        await (
+          await loadTool(rawClosure)
+        ).toAssistantMessage!(output),
+      closure,
+    };
+  }
   return callbacks;
 }
 

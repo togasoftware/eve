@@ -142,6 +142,12 @@ export function replayDynamicTools(
       "toModelOutput",
       entry.callbacks.toModelOutput,
     );
+    const toAssistantMessage = bindDynamicCallback(
+      entry,
+      owner,
+      "toAssistantMessage",
+      entry.callbacks.toAssistantMessage,
+    );
 
     const replayed: {
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
@@ -191,6 +197,7 @@ export function replayDynamicTools(
       };
     }
     if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
+    if (toAssistantMessage !== undefined) replayed.toAssistantMessage = toAssistantMessage;
     return replayed;
   });
 }

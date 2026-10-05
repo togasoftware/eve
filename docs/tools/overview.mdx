@@ -260,6 +260,32 @@ toModelOutput(output) {
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
 
+## End the turn with a tool-authored message
+
+When a trusted tool result already contains the complete assistant message to
+send, project it with `toAssistantMessage`:
+
+```ts
+toAssistantMessage(output) {
+  return output.waitForCustomer ? output.question : null;
+},
+```
+
+A non-empty string is appended to durable assistant history and emitted as a
+terminal `message.completed` event. eve then completes the conversation turn
+and waits for the next user message without making another model call. Return
+`null` or `undefined` to continue the normal model tool loop.
+
+Use this only when trusted application code owns the exact wording. It is not a
+general renderer for retrieved, user-authored, or third-party text. A model
+still sees the paired tool result in later history; `toModelOutput` continues to
+control that model-facing value. Only one tool result may produce an assistant
+message in a step, and the projection is not applied to task runs, structured
+output turns, provider-executed tools, or failed tool results.
+
+Dynamic tools may use `toAssistantMessage` too. eve snapshots and replays the
+callback through the same durable mechanism as `execute` and `toModelOutput`.
+
 ### Send images to the model with content parts
 
 A tool that produces an image — a screenshot, a rendered chart — can hand the pixels to a vision-capable model by returning a `content` output from `toModelOutput`. Build outputs with the `toolOutput` helpers and parts with the `toolOutputPart` helpers, both from `eve/tools`:

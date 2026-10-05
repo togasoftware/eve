@@ -23,6 +23,9 @@ type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unkn
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
 
+/** A tool-derived assistant message that ends the current conversation turn. */
+export type ToolAssistantMessage = string | null | undefined;
+
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
@@ -230,6 +233,15 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * (`action.result`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+  /**
+   * Optionally converts a successful tool result into the assistant's terminal
+   * message for the current conversation turn. Returning a non-empty string
+   * appends it to durable model history, emits `message.completed`, and parks
+   * without another model call.
+   *
+   * Return `null` or `undefined` to continue the normal model tool loop.
+   */
+  toAssistantMessage?: (output: TOutput) => ToolAssistantMessage | Promise<ToolAssistantMessage>;
 }
 
 type ToolOutputFromExecuteReturn<TReturn> =
@@ -273,6 +285,10 @@ export function defineTool<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
+  toAssistantMessage?: ToolDefinition<
+    unknown,
+    StandardJSONSchemaV1.InferOutput<TOutputSchema>
+  >["toAssistantMessage"];
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TInputSchema>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>,
@@ -293,6 +309,10 @@ export function defineTool<
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+  toAssistantMessage?: ToolDefinition<
+    unknown,
+    ToolOutputFromExecuteReturn<TReturn>
+  >["toAssistantMessage"];
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
   ToolOutputFromExecuteReturn<TReturn>,
@@ -319,6 +339,10 @@ export function defineTool<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["toModelOutput"];
+  toAssistantMessage?: ToolDefinition<
+    unknown,
+    StandardJSONSchemaV1.InferOutput<TOutputSchema>
+  >["toAssistantMessage"];
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>,
@@ -333,6 +357,10 @@ export function defineTool<TReturn>(definition: {
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
   approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
+  toAssistantMessage?: ToolDefinition<
+    unknown,
+    ToolOutputFromExecuteReturn<TReturn>
+  >["toAssistantMessage"];
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
   ToolOutputFromExecuteReturn<TReturn>,
@@ -362,6 +390,7 @@ export function stampToolDefinition<
     readonly approval?: Approval<never>;
     readonly approvalKey?: (...args: never[]) => unknown;
     readonly toModelOutput?: (...args: never[]) => unknown;
+    readonly toAssistantMessage?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
   if ((definition as { readonly auth?: unknown }).auth !== undefined) {
@@ -381,6 +410,7 @@ export function stampToolDefinition<
       approvalKey: definition.approvalKey,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
+      toAssistantMessage: definition.toAssistantMessage,
     }),
   );
   stampDefinitionKey(definition, `tool:${definition.description}`);

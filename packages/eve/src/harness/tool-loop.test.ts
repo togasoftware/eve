@@ -3931,6 +3931,105 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("ends a conversation turn with a runtime-authored assistant message from a tool result", async () => {
+    const toolCall = {
+      input: { leadId: "lead-1" },
+      toolCallId: "call-1",
+      toolName: "qualify_lead",
+      type: "tool-call" as const,
+    };
+    const toolOutput = {
+      ok: true,
+      response: {
+        mode: "verbatim",
+        text: "Can an authorized person provide access?",
+        waitForCustomer: true,
+      },
+    };
+    const toolResult = {
+      ...toolCall,
+      output: toolOutput,
+      type: "tool-result" as const,
+    };
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          { content: [toolCall], role: "assistant" },
+          { content: [toolResult], role: "tool" },
+        ],
+      },
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    });
+
+    const { emit, events } = createEventCollector();
+    const toAssistantMessage = vi.fn((output: unknown) => {
+      const response = (output as typeof toolOutput).response;
+      return response.mode === "verbatim" && response.waitForCustomer ? response.text : null;
+    });
+    const config = createTestConfig("conversation", emit, {
+      tools: new Map([
+        [
+          "qualify_lead",
+          {
+            description: "Qualify a lead",
+            execute: vi.fn().mockResolvedValue(toolOutput),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "qualify_lead",
+            toAssistantMessage,
+          },
+        ],
+      ]),
+    });
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          {
+            description: "Qualify a lead",
+            inputSchema: { type: "object" },
+            name: "qualify_lead",
+          },
+        ],
+      },
+    });
+
+    const result = await createToolLoopHarness(config)(session, { message: "Continue" });
+
+    expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
+    expect(toAssistantMessage).toHaveBeenCalledExactlyOnceWith(toolOutput);
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "Can an authorized person provide access?" });
+    expect(result.session.history).toEqual([
+      { content: "Continue", kind: "user", role: "user" },
+      { content: [toolCall], role: "assistant" },
+      { content: [toolResult], role: "tool" },
+      { content: "Can an authorized person provide access?", role: "assistant" },
+    ]);
+    expect(getCompatibilityEventTypes(events)).toEqual([
+      "session.started",
+      "turn.started",
+      "message.received",
+      "step.started",
+      "actions.requested",
+      "action.result",
+      "step.completed",
+      "message.completed",
+      "turn.completed",
+      "session.waiting",
+    ]);
+    expect(events.findLast((event) => event.type === "message.completed")?.data).toEqual({
+      finishReason: "stop",
+      message: "Can an authorized person provide access?",
+      sequence: 0,
+      stepIndex: 1,
+      turnId: "turn_0",
+    });
+  });
+
   it("skips AI-SDK-marked invalid tool calls so a malformed JSON payload does not crash the harness", async () => {
     // Simulates the AI SDK fallback path: when the model emits unparsable
     // JSON for a tool call, `parseToolCall` returns a DynamicToolCall with

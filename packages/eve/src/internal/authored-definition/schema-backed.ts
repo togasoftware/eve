@@ -121,6 +121,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "approvalKey",
       "outputSchema",
       "toModelOutput",
+      "toAssistantMessage",
     ],
     message,
   );
@@ -193,6 +194,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
 
   if (record.toModelOutput !== undefined) {
     expectFunction(record.toModelOutput, message);
+  }
+
+  if (record.toAssistantMessage !== undefined) {
+    expectFunction(record.toAssistantMessage, message);
   }
 
   if (record.auth !== undefined) {
