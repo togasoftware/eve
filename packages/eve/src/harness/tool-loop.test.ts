@@ -4030,6 +4030,109 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("ends a conversation turn with a runtime-authored assistant message from a step-dynamic tool", async () => {
+    const toolCall = {
+      input: { leadId: "lead-1" },
+      toolCallId: "call-1",
+      toolName: "qualify_lead",
+      type: "tool-call" as const,
+    };
+    const toolOutput = {
+      ok: true,
+      response: {
+        mode: "verbatim",
+        text: "Can an authorized person provide access?",
+        waitForCustomer: true,
+      },
+    };
+    const toolResult = {
+      ...toolCall,
+      output: toolOutput,
+      type: "tool-result" as const,
+    };
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          { content: [toolCall], role: "assistant" },
+          { content: [toolResult], role: "tool" },
+        ],
+      },
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
+    const owner = {
+      entryKey: "lead__qualify_lead",
+      name: "qualify_lead",
+      resolverSlug: "lead",
+      scope: "step" as const,
+      sessionId: "test-session",
+    };
+    registerDurableDynamicCallback({
+      callback: () => toolOutput,
+      owner,
+      phase: "execute",
+    });
+    const toAssistantMessage = vi.fn((_closure: unknown, output: unknown) => {
+      const response = (output as typeof toolOutput).response;
+      return response.mode === "verbatim" && response.waitForCustomer ? response.text : null;
+    });
+    registerDurableDynamicCallback({
+      callback: toAssistantMessage,
+      owner,
+      phase: "toAssistantMessage",
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: { closure: {} },
+          toAssistantMessage: { closure: {} },
+        },
+        description: "Qualify a lead",
+        entryKey: owner.entryKey,
+        inputSchema: { type: "object" },
+        name: owner.name,
+        resolverSlug: owner.resolverSlug,
+      },
+    ]);
+
+    const { emit, events } = createEventCollector();
+    const config = createTestConfig("conversation", emit, { tools: new Map() });
+    const session = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [],
+      },
+    });
+
+    const result = await contextStorage.run(ctx, () =>
+      createToolLoopHarness(config)(session, { message: "Continue" }),
+    );
+
+    expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
+    expect(toAssistantMessage).toHaveBeenCalledExactlyOnceWith({}, toolOutput);
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "Can an authorized person provide access?" });
+    expect(result.session.history).toEqual([
+      { content: "Continue", kind: "user", role: "user" },
+      { content: [toolCall], role: "assistant" },
+      { content: [toolResult], role: "tool" },
+      { content: "Can an authorized person provide access?", role: "assistant" },
+    ]);
+    expect(events.findLast((event) => event.type === "message.completed")?.data).toEqual({
+      finishReason: "stop",
+      message: "Can an authorized person provide access?",
+      sequence: 0,
+      stepIndex: 1,
+      turnId: "turn_0",
+    });
+  });
+
   it("skips AI-SDK-marked invalid tool calls so a malformed JSON payload does not crash the harness", async () => {
     // Simulates the AI SDK fallback path: when the model emits unparsable
     // JSON for a tool call, `parseToolCall` returns a DynamicToolCall with

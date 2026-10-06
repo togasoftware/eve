@@ -1415,6 +1415,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           flatTools[name] = toolDefinition;
         }
+        modelCallCoordinationTools = new Map([
+          ...advertisedHarnessTools,
+          ...dynamicTools.map((tool) => [tool.name, tool] as const),
+        ]);
       }
 
       if (session.outputSchema !== undefined) {
