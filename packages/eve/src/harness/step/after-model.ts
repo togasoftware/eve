@@ -48,6 +48,7 @@ import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { setRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { createLogger } from "#internal/logging.js";
+import { createMessageCompletedEvent } from "#protocol/message.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -205,6 +206,17 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   }
 
   const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
+  const runtimeAssistantMessage =
+    !step.hasDelegatedCaller &&
+    step.session.outputSchema === undefined &&
+    result.finishReason === "tool-calls" &&
+    responseTail.at(-1)?.role === "tool" &&
+    !hasRunnableQueue(step.view())
+      ? await resolveRuntimeAssistantMessage({ catalog: input.catalog, result })
+      : null;
+  if (runtimeAssistantMessage !== null) {
+    return finishTurnWithRuntimeAssistantMessage(step, result, runtimeAssistantMessage);
+  }
   const continueLoop =
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
@@ -224,6 +236,64 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     // Text written before an `endsTurn` call was narration, not the reply.
     stepOutput: endsTurn ? null : stepOutput,
   });
+}
+
+async function resolveRuntimeAssistantMessage(input: {
+  readonly catalog: ModelResponse["catalog"];
+  readonly result: HarnessStepResult;
+}): Promise<string | null> {
+  const messages: Array<{ readonly callId: string; readonly message: string }> = [];
+
+  for (const result of input.result.toolResults ?? []) {
+    if (result.type !== "tool-result" || result.providerExecuted === true) continue;
+    const project = input.catalog.get(result.toolName)?.toAssistantMessage;
+    if (project === undefined) continue;
+
+    const message = await project(result.output);
+    if (message === null || message === undefined) continue;
+    if (typeof message !== "string" || message.trim().length === 0) {
+      throw new TypeError(
+        `Tool "${result.toolName}" toAssistantMessage must return a non-empty string, null, or undefined.`,
+      );
+    }
+    messages.push({ callId: result.toolCallId, message });
+  }
+
+  if (messages.length > 1) {
+    throw new Error(
+      `Multiple tool results requested a runtime-authored assistant message in one step (${messages
+        .map((entry) => entry.callId)
+        .join(", ")}). Only one terminal message is allowed.`,
+    );
+  }
+
+  return messages[0]?.message ?? null;
+}
+
+async function finishTurnWithRuntimeAssistantMessage(
+  step: Step,
+  result: HarnessStepResult,
+  message: string,
+): Promise<StepResult> {
+  step.session = {
+    ...step.session,
+    history: validateHarnessModelMessages([
+      ...step.session.history,
+      { content: message, role: "assistant" },
+    ]),
+  };
+  const { sequence, stepIndex, turnId } = step.position();
+  await step.publish(
+    createMessageCompletedEvent({
+      finishReason: "stop",
+      message,
+      sequence,
+      stepIndex: stepIndex + 1,
+      turnId,
+    }),
+    step.session.history,
+  );
+  return settleTurn(step, { history: step.session.history, result, stepOutput: message });
 }
 
 /**

@@ -3652,7 +3652,7 @@ describe("createToolLoopHarness", () => {
     ]);
 
     const { emit, events } = createEventCollector();
-    const config = createTestConfig("conversation", emit, { tools: new Map() });
+    const config = createTestConfig(emit, { tools: new Map() });
     const session = createTestSession({
       agent: {
         modelReference: { id: "test-model" },

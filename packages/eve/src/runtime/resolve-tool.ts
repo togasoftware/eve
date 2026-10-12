@@ -122,7 +122,7 @@ export async function resolveToolDefinition(
  */
 type OptionalResolvedFields = {
   -readonly [
-    K in "label" | "approval" | "approvalKey" | "endsTurn" | "toModelOutput"
+    K in "label" | "approval" | "approvalKey" | "endsTurn" | "toModelOutput" | "toAssistantMessage"
   ]?: ResolvedToolDefinition[K];
 };
 

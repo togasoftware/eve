@@ -162,6 +162,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "approval",
       "approvalKey",
       "outputSchema",
+      "toAssistantMessage",
       "toModelOutput",
       ...(workflow === undefined ? [] : [workflow.entryPoint]),
     ],
