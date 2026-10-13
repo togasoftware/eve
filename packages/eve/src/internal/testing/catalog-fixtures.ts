@@ -101,6 +101,8 @@ export interface CatalogSkillSource {
 /** The parts of a session bundle the catalog reads: authored skills and dynamic subagent resolvers. */
 export function catalogBundle(
   input: {
+    /** Whether the agent enables its framework catalog tools. */
+    readonly catalogTools?: boolean;
     /** The connections the agent declares. */
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
@@ -115,7 +117,7 @@ export function catalogBundle(
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
-      config: { name: "test-agent" },
+      config: { catalogTools: input.catalogTools, name: "test-agent" },
       connections: input.connections ?? [],
       dynamicSkillResolvers: [],
       dynamicToolResolvers: [],

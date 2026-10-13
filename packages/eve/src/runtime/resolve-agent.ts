@@ -179,6 +179,7 @@ function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
+    catalogTools?: boolean;
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
@@ -191,6 +192,10 @@ function createResolvedAgentConfig(
   } = {
     name: manifest.config.name,
   };
+
+  if (manifest.config.catalogTools !== undefined) {
+    config.catalogTools = manifest.config.catalogTools;
+  }
 
   if (manifest.config.defaultTools !== undefined) {
     config.defaultTools = manifest.config.defaultTools;

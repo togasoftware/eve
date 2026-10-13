@@ -56,6 +56,7 @@ export function normalizeAgentDefinition(
     record,
     [
       "build",
+      "catalogTools",
       "compaction",
       "defaultTools",
       "description",
@@ -88,6 +89,10 @@ export function normalizeAgentDefinition(
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
+  }
+
+  if (record.catalogTools !== undefined) {
+    definition.catalogTools = expectBoolean(record.catalogTools, message);
   }
 
   if (record.defaultTools !== undefined) {

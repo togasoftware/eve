@@ -83,6 +83,7 @@ export async function compileAgentConfig(
 
   const compiledConfig: {
     build?: CompiledAgentDefinition["build"];
+    catalogTools?: boolean;
     compaction: {
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
@@ -103,6 +104,10 @@ export async function compileAgentConfig(
 
   if (definition.defaultTools !== undefined) {
     compiledConfig.defaultTools = definition.defaultTools;
+  }
+
+  if (definition.catalogTools !== undefined) {
+    compiledConfig.catalogTools = definition.catalogTools;
   }
 
   if (definition.description !== undefined) {

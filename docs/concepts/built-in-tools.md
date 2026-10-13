@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`defaultTools` doesn't affect [the catalog tools](#eve__search-eve__tool-and-eve__skill): eve adds them from what the agent declares, as listed in that section.
+`defaultTools` doesn't affect [the catalog tools](#eve__search-eve__tool-and-eve__skill): eve adds them from what the agent declares, as listed in that section. Set `catalogTools: false` only when every capability the model may use is listed directly in its tool list.
 
 ### `bash`
 
@@ -301,7 +301,7 @@ export default disableTool();
 
 ### `eve__search`, `eve__tool`, and `eve__skill`
 
-These tools let the model reach what isn't in its tool list. `eve__search` finds tools defined with `deferred: true`, agents defined with `tool: "deferred"`, every tool from the agent's [connections](../connections), and deferred [skills](../skills). `eve__tool` calls a deferred tool, agent, or connection tool by name, and `eve__skill` loads a skill, deferred or not. There is no add command; eve adds each one from what the agent declares, even when `defaultTools` is `false`:
+These tools let the model reach what isn't in its tool list. `eve__search` finds tools defined with `deferred: true`, agents defined with `tool: "deferred"`, every tool from the agent's [connections](../connections), and deferred [skills](../skills). `eve__tool` calls a deferred tool, agent, or connection tool by name, and `eve__skill` loads a skill, deferred or not. There is no add command; eve adds each one from what the agent declares, even when `defaultTools` is `false`. Set `catalogTools: false` in `agent/agent.ts` to omit all three when every capability the model may use is listed directly:
 
 - `eve__tool` comes with anything it can call: a deferred tool or agent, a connection, or a dynamic resolver in `agent/tools/`, `agent/subagents/`, or `agent/connections/` that may add one at runtime.
 - `eve__skill` comes with any skill, static or from a dynamic skill resolver, so an agent whose only catalog entries are listed skills gets `eve__skill` alone.

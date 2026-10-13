@@ -95,6 +95,28 @@ describe("buildStepCatalog", () => {
       expect(names(catalog.advertised)).toEqual(["add"]);
     });
 
+    it("omits every catalog tool when the agent disables its catalog", () => {
+      const bundle = catalogBundle({ catalogTools: false });
+      const ctx = new ContextContainer();
+      ctx.set(BundleKey, {
+        ...bundle,
+        resolvedAgent: {
+          ...bundle.resolvedAgent,
+          dynamicSkillResolvers: [{}] as never,
+          dynamicToolResolvers: [{}] as never,
+        },
+      });
+      const catalog = buildStepCatalog({
+        agentTools: toolMap(inlineTool("add"), inlineTool("refund", { deferred: true })),
+        ctx,
+        endsTurn: true,
+        session: {},
+      });
+
+      expect(names(catalog.advertised)).toEqual(["add"]);
+      expect(names(catalog.deferred)).toEqual(["refund"]);
+    });
+
     it("gives an agent with only listed skills eve__skill alone, which never mentions search", async () => {
       const { catalog } = catalogContext({ skills: [{ name: "house-rules" }] });
 

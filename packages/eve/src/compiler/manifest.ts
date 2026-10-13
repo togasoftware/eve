@@ -630,6 +630,7 @@ const compiledAgentLimitsDefinitionSchema = z
 
 const compiledAgentConfigBaseFields = {
   build: compiledAgentBuildDefinitionSchema.optional(),
+  catalogTools: z.boolean().optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
   defaultTools: z.boolean().optional(),
   description: z.string().optional(),
@@ -1226,6 +1227,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
                 ? undefined
                 : [...config.build.externalDependencies],
           },
+    catalogTools: config.catalogTools,
     compaction: {
       model:
         config.compaction?.model === undefined

@@ -88,6 +88,15 @@ function catalogToolsFor(
   bundle: CompiledBundle | undefined,
 ): CatalogTools {
   const agent = bundle?.resolvedAgent;
+  if (agent?.config?.catalogTools === false) {
+    return {
+      connections: false,
+      search: false,
+      searchableSkills: false,
+      skills: false,
+      tools: false,
+    };
+  }
   const skills = agent?.skills ?? [];
   const dynamicSkills = (agent?.dynamicSkillResolvers.length ?? 0) > 0;
   const connections =

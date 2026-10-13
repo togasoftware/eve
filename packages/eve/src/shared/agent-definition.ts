@@ -340,6 +340,7 @@ export type InternalAgentDefinition = {
   name: string;
   description?: string;
   build?: AgentBuildDefinition;
+  catalogTools?: boolean;
   compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
   experimental?: AgentExperimentalDefinition;
@@ -365,6 +366,13 @@ type PublicAgentDefinitionBase = {
    */
   readonly description?: string;
   readonly build?: AgentBuildDefinition;
+  /**
+   * Whether eve adds its catalog tools (`eve__search`, `eve__tool`, and
+   * `eve__skill`) from the capabilities this agent declares. Defaults to `true`.
+   * Set this to `false` only when every capability the model may use is listed
+   * directly in its tool list.
+   */
+  readonly catalogTools?: boolean;
   readonly compaction?: PublicAgentCompactionDefinition;
   /**
    * Whether eve automatically adds its optional default tools. Defaults to `true`.
