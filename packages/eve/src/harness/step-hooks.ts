@@ -65,7 +65,6 @@ export type HarnessStepResult = Pick<
   | "toolResults"
   | "usage"
 > & {
-  readonly completedMessageCount?: number;
   readonly invalidInputToolCallIds?: ReadonlySet<string>;
 };
 

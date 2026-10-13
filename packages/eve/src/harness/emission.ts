@@ -56,7 +56,6 @@ import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
  * authorization results also route back to the park detector.
  */
 interface EmittedStreamContent {
-  readonly completedMessageCount: number;
   readonly emittedActionCallIds: ReadonlySet<string>;
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
   readonly invalidInputToolCallIds: ReadonlySet<string>;
@@ -135,7 +134,6 @@ async function consumeStreamContent(
 ): Promise<EmittedStreamContent> {
   let currentReasoning = "";
   let currentMessage = "";
-  let completedMessageCount = 0;
   let finishReason: AssistantStepFinishReason = "stop";
   let streamError: Error | undefined;
   const toolCallIdsSeenInStream = new Set<string>();
@@ -162,7 +160,6 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
-    completedMessageCount += 1;
     currentMessage = "";
   };
 
@@ -512,11 +509,9 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
-    completedMessageCount += 1;
   }
 
   return {
-    completedMessageCount,
     emittedActionCallIds,
     handledInlineToolResultCallIds,
     invalidInputToolCallIds,

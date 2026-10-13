@@ -420,7 +420,6 @@ export class ModelCaller {
     const excludedActionToolNames = new Set([REPLY_TOOL_NAME]);
     const streamResult = await agent.stream({ abortSignal: generation.signal, messages });
     const {
-      completedMessageCount,
       emittedActionCallIds,
       handledInlineToolResultCallIds,
       invalidInputToolCallIds,
@@ -482,7 +481,6 @@ export class ModelCaller {
       toolResultsByCallId.set(toolResult.toolCallId, toolResult);
     }
     return withAccumulatedResponseMessages({
-      completedMessageCount,
       invalidInputToolCallIds,
       responseMessages: appendMissingToolResultMessages({
         append: [...trailingInlineToolResultParts, ...answerSkippedToolCalls(stepResult, catalog)],

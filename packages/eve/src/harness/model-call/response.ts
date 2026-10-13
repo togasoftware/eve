@@ -13,7 +13,6 @@ type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][numbe
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
 export function withAccumulatedResponseMessages(input: {
-  readonly completedMessageCount?: number;
   readonly invalidInputToolCallIds?: ReadonlySet<string>;
   readonly responseMessages: readonly StepResponseMessage[];
   readonly stepResult: HarnessStepResult;
@@ -28,9 +27,6 @@ export function withAccumulatedResponseMessages(input: {
    * approval-resume results created before the model step.
    */
   return {
-    ...(input.completedMessageCount === undefined
-      ? {}
-      : { completedMessageCount: input.completedMessageCount }),
     content: stepResult.content,
     finishReason: stepResult.finishReason,
     ...(input.invalidInputToolCallIds === undefined
