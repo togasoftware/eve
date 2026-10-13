@@ -222,7 +222,10 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasRunnableQueue(step.view()));
-  if (continueLoop) return { next: step.runStep, session: step.session };
+  if (continueLoop) {
+    await publishUnstreamedStepMessage(step, result, stepOutput);
+    return { next: step.runStep, session: step.session };
+  }
   // The turn rule: no turn ends while its tasks work. The session waits for
   // one to settle, then calls the model again in the same turn.
   if (workingTasks.length > 0) {
@@ -236,6 +239,32 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     // Text written before an `endsTurn` call was narration, not the reply.
     stepOutput: endsTurn ? null : stepOutput,
   });
+}
+
+/**
+ * Some AI SDK models keep text beside tool calls in the completed response but
+ * omit it from `fullStream`. Preserve the message boundary without duplicating
+ * text the stream consumer already completed.
+ */
+async function publishUnstreamedStepMessage(
+  step: Step,
+  result: HarnessStepResult,
+  message: string | null,
+): Promise<void> {
+  if ((result.completedMessageCount ?? 0) > 0 || message === null || message.trim().length === 0) {
+    return;
+  }
+  const { sequence, stepIndex, turnId } = step.position();
+  await step.publish(
+    createMessageCompletedEvent({
+      finishReason: "tool-calls",
+      message,
+      sequence,
+      stepIndex,
+      turnId,
+    }),
+    step.session.history,
+  );
 }
 
 async function resolveRuntimeAssistantMessage(input: {

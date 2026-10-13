@@ -103,6 +103,7 @@ export function toEntryStep<T extends ModelMessage>(
     part.type !== "tool-result" || !dispatched.has(part.toolCallId!);
   // SDK step fields are prototype getters, so each one is read explicitly.
   const entryStep: StepFields = {
+    completedMessageCount: step.completedMessageCount,
     content: (step.content ?? []).filter(kept).map((part) => toEntryPart(part, resolve)),
     finishReason: step.finishReason,
     invalidInputToolCallIds: step.invalidInputToolCallIds,

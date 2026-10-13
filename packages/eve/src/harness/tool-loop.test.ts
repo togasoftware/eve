@@ -5983,6 +5983,46 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("completes text beside a tool call when the SDK omits that text from fullStream", async () => {
+    const toolCall = {
+      input: { a: 1, b: 2 },
+      toolCallId: "call-1",
+      toolName: "add",
+      type: "tool-call" as const,
+    };
+    const toolResult = { ...toolCall, output: "3", type: "tool-result" as const };
+    setupMockAgent({
+      finishReason: "tool-calls",
+      fullStreamParts: [{ finishReason: "tool-calls", type: "finish-step" }],
+      response: {
+        messages: [
+          {
+            content: [{ text: "Checking that now.", type: "text" }, toolCall],
+            role: "assistant",
+          },
+          { content: [toolResult], role: "tool" },
+        ],
+      },
+      text: "Checking that now.",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const result = await runStep(createTestSession(), { message: "Add these." });
+
+    expect(typeof result.next).toBe("function");
+    expect(events.filter((event) => event.type === "message.completed")).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          finishReason: "tool-calls",
+          message: "Checking that now.",
+        }),
+      }),
+    ]);
+  });
+
   it("emits each streamed tool call before its later result", async () => {
     setupMockAgent({
       finishReason: "stop",
